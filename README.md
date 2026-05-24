@@ -272,7 +272,5 @@ Desenvolvedor Full Stack focado em:
 
 > ⚡ *"Uma IA local não precisa ser fria. Ela pode ter personalidade."*
 
-```
-
 
 ```
