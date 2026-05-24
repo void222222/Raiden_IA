@@ -1,10 +1,12 @@
-```markdown
-# ⚡ Raiden IA – Assistente Virtual Tsundere com Visão, Voz e Humor
-
 ![Python](https://img.shields.io/badge/Python-3.12+-blue?style=for-the-badge&logo=python)
 ![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-orange?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![Offline](https://img.shields.io/badge/AI-100%25%20Offline-red?style=for-the-badge)
+
+```markdown
+# ⚡ Raiden IA – Assistente Virtual Tsundere com Visão, Voz e Humor
+
+
 
 > **Status:** Em desenvolvimento ativo – backend funcional, frontend nativo (Tauri + ChatVRM) em construção.  
 > **Objetivo:** Uma assistente IA 100% local, offline, com personalidade forte, memória, agenda, visão computacional e controle de sistema.
