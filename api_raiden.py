@@ -1,379 +1,611 @@
-"""
-Raiden 2.0 Backend – FastAPI
-Substitui todo o loop infinito antigo.
-Agora o PC fica servindo as requisições do app Tauri (local ou remoto via Tailscale).
-"""
-
+"""🎌 RAIDEN - Assistente Virtual Linux (Arquitetura Modular + Comandos Dinâmicos)"""
+import asyncio
 import base64
-import io
 import json
 import os
 import re
-import sqlite3
-import time
 import threading
-from io import BytesIO
+import time
 from typing import Optional
-from contextlib import asynccontextmanager
-
-import requests
+import httpx
+import speech_recognition as sr
 import uvicorn
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from PIL import Image
-import mss
-import numpy as np
+import logging
+import warnings
 
-# --- Configurações Globais ---
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_VISION_URL = "http://localhost:11434/api/generate"   # mesma rota, muda o modelo
-WAKE_WORD = "raiden"           # será tratado no cliente Tauri, aqui fica só referência
-TEMPO_SILENCIO_PARA_PROATIVIDADE = 45  # segundos sem interação para o servidor sugerir fala
-MODELO_CONVERSA = "raiden_nova"
-MODELO_CODIGO = "qwen2.5-coder:7b"
-MODELO_ROTEADOR = "llama3:8b"  # leve, só para classificar intenção
-MODELO_VISAO = "llava:7b"      # ou qwen:vision
+# ========= MÓDULOS INTERNOS =========
+from modulos.memoria import (
+    iniciar_caderno, ajustar_humor, anotar_no_caderno,
+    ler_ultimas_conversas, carregar_bio
+)
+from modulos.cerebro import (
+    chamar_ollama, router_intencao,
+    MODELO_CONVERSA, MODELO_CODIGO, MODELO_VISAO
+)
+from modulos.audio import gerar_fala, limpar_emojis
+from modulos.sistema import (
+    capturar_tela, ajustar_volume, controlar_midia,
+    digitar_texto, abrir_editor, extrair_numero_do_texto
+)
+from modulos.web import (
+    executar_pesquisa_google, executar_pesquisa_youtube,
+    executar_video_youtube_direto, devorar_video_youtube
+)
+from modulos.grande_sabio import executar_pesquisa_profunda
 
-# --- Bio do Mestre ---
-def carregar_bio():
-    try:
-        with open("bio_raiden.txt", "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return "O usuário é Lucas, seu mestre. Ele é esforçado e está construindo você."
+# ========= CONFIGURAÇÕES INICIAIS =========
+os.environ['ALSA_CARD'] = 'default'
+os.environ['AUDIODEV'] = 'null'
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+logging.getLogger("uvicorn.access").disabled = True
+logging.getLogger("speech_recognition").setLevel(logging.ERROR)
 
+# ========= APLICAÇÃO FASTAPI =========
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Inicializa banco de dados
+iniciar_caderno()
 BIO = carregar_bio()
 
-# --- Banco de Dados (Thread‑safe por conexão) ---
-def get_db():
-    conn = sqlite3.connect("memoria_raiden.db", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+# ========= PROCESSAMENTO DE MENSAGENS (CÉREBRO CENTRAL) =========
 
-def iniciar_caderno():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS historico 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, autor TEXT, mensagem TEXT, timestamp REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS agenda 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, tarefa TEXT, data TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS estado 
-                 (chave TEXT PRIMARY KEY, valor INTEGER)''')
-    c.execute('INSERT OR IGNORE INTO estado (chave, valor) VALUES ("irritacao", 0)')
-    conn.commit()
-    return conn
-
-conn = iniciar_caderno()
-
-def ajustar_humor(delta):
-    c = conn.cursor()
-    c.execute("SELECT valor FROM estado WHERE chave = 'irritacao'")
-    atual = c.fetchone()[0]
-    novo = max(0, min(100, atual + delta))
-    c.execute("UPDATE estado SET valor = ? WHERE chave = 'irritacao'", (novo,))
-    conn.commit()
-    return novo
-
-def anotar_no_caderno(autor, msg):
-    c = conn.cursor()
-    c.execute("INSERT INTO historico (autor, mensagem, timestamp) VALUES (?, ?, ?)",
-              (autor, msg, time.time()))
-    conn.commit()
-
-def ler_ultimas_conversas(limite=4):
-    c = conn.cursor()
-    c.execute("SELECT autor, mensagem FROM historico ORDER BY id DESC LIMIT ?", (limite,))
-    linhas = c.fetchall()
-    linhas.reverse()
-    return "".join(f"{l['autor']}: {l['mensagem']}\n" for l in linhas)
-
-def salvar_tarefa(tarefa):
-    c = conn.cursor()
-    data = time.strftime("%d/%m/%Y")
-    c.execute("INSERT INTO agenda (tarefa, data) VALUES (?, ?)", (tarefa, data))
-    conn.commit()
-    return f"Tarefa '{tarefa}' anotada."
-
-def listar_tarefas():
-    c = conn.cursor()
-    c.execute("SELECT tarefa FROM agenda")
-    tarefas = c.fetchall()
-    if not tarefas:
-        return "Sua agenda está vazia."
-    return "Suas tarefas são: " + ", ".join(t['tarefa'] for t in tarefas)
-
-# --- Funções da IA ---
-def chamar_ollama(modelo: str, prompt: str, system: str = None) -> str:
-    payload = {"model": modelo, "prompt": prompt, "stream": False}
-    if system:
-        payload["system"] = system
-    try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
-        resp.raise_for_status()
-        return resp.json()["response"]
-    except Exception as e:
-        print(f"Erro no Ollama ({modelo}): {e}")
-        return "[Erro na IA]"
-
-def router_intencao(mensagem: str) -> str:
-    """
-    Usa um modelo leve para decidir se a mensagem é sobre código ou conversa.
-    Retorna 'codigo' ou 'conversa'.
-    """
-    prompt = f"""
-Você é um classificador. Analise a mensagem do usuário e responda apenas com uma palavra: "codigo" se for um pedido relacionado a programação, script, debug, etc; "conversa" para qualquer outra coisa (papo, perguntas pessoais, comandos de sistema, etc).
-
-Mensagem: {mensagem}
-Classificação:"""
-    resposta = chamar_ollama(MODELO_ROTEADOR, prompt).strip().lower()
-    if "codigo" in resposta:
-        return "codigo"
-    else:
-        return "conversa"
-
-def gerar_fala(texto: str) -> bytes:
-    """
-    Gera áudio em memória e retorna os bytes do MP3.
-    Pode substituir gTTS por algo melhor depois (ex: edge-tts).
-    """
-    from gtts import gTTS
-    mp3_fp = BytesIO()
-    tts = gTTS(text=texto, lang='pt', slow=False)
-    tts.write_to_fp(mp3_fp)
-    mp3_fp.seek(0)
-    return mp3_fp.read()
-
-def processar_mensagem(texto_usuario: str) -> dict:
-    """
-    Recebe o texto do usuário, faz toda a lógica (roteamento, IA, comandos internos)
-    e retorna um dicionário com a resposta e áudio.
-    """
+async def processar_mensagem(texto_usuario: str) -> dict:
     texto = texto_usuario.lower().strip()
     if not texto:
         return {"texto": "", "audio": None, "expressao": None}
 
-    # --- Comandos diretos de sistema (sem IA) ---
-    if "encerrar sistema" in texto:
-        return {"texto": "Até logo, Lucas.", "audio": gerar_fala("Até logo, Lucas."), "expressao": None}
+    print(f"\n🧠 Processando: '{texto_usuario}'")
 
-    # Expressões manuais (caso queira manter)
+    # ====== COMANDOS LOCAIS RÁPIDOS (FAST-PATH) ======
+    
+    # Humor
     if "cara de brava" in texto or "ficar brava" in texto:
         return {"texto": "Pronto, estou furiosa.", "audio": gerar_fala("Pronto, estou furiosa."), "expressao": "angry"}
-    if "cara de feliz" in texto or "ficar feliz" in texto:
-        return {"texto": "Assim está melhor? Não se acostume.", "audio": gerar_fala("Assim está melhor? Não se acostume."), "expressao": "happy"}
-    if "cara de triste" in texto or "triste" in texto:
-        return {"texto": "Por sua causa, agora estou triste.", "audio": gerar_fala("Por sua causa, agora estou triste."), "expressao": "sad"}
-    if "cara de surpresa" in texto or "surpresa" in texto:
-        return {"texto": "Ah! Me assustou.", "audio": gerar_fala("Ah! Me assustou."), "expressao": "surprised"}
     if "cara normal" in texto or "voltar ao normal" in texto:
         return {"texto": "Hum, melhor assim.", "audio": gerar_fala("Hum, melhor assim."), "expressao": "neutral"}
-
-    # Agenda
-    if "anotar" in texto or "lembrar" in texto:
-        item = re.sub(r'(anotar|lembrar)', '', texto).strip()
-        if item:
-            resp = salvar_tarefa(item)
+    
+    # Encerramento
+    if "encerrar sistema" in texto or "desligar sistema" in texto:
+        return {"texto": "Até logo, Lucas. Foi bom trabalhar com você.", "audio": gerar_fala("Até logo, Lucas. Foi bom trabalhar com você."), "expressao": None}
+    
+    # ====== AGENDA: LISTAR TAREFAS (verificar primeiro) ======
+    if any(g in texto for g in ["quais são minhas tarefas", "mostrar agenda", "ver agenda", 
+                                  "o que eu tenho pra fazer", "minhas tarefas", "lista de tarefas",
+                                  "me mostrar a agenda", "mostrar tarefas", "listar tarefas",
+                                  "o que tem na agenda", "o que está na agenda"]):
+        from modulos.memoria import listar_tarefas
+        
+        resultado = listar_tarefas()
+        print(f"   📅 Listando tarefas: {resultado}")
+        
+        audio_bytes = gerar_fala(resultado)
+        anotar_no_caderno("Lucas", texto_usuario)
+        anotar_no_caderno("Raiden", resultado)
+        return {"texto": resultado, "audio": audio_bytes, "expressao": None}
+    
+    # ====== AGENDA: SALVAR TAREFA ======
+    gatilhos_agenda = ["agendar", "agenda ", "agende", "anota tarefa", "salvar tarefa", 
+                       "salvar compromisso", "lembrar de", "me lembrar", "marcar compromisso", 
+                       "adicionar na agenda", "marcar na agenda", "colocar na agenda", 
+                       "criar tarefa", "nova tarefa", "novo compromisso", "novo evento",
+                       "anotar compromisso", "registrar tarefa", "registrar compromisso"]
+    
+    if any(g in texto for g in gatilhos_agenda):
+        from modulos.memoria import salvar_tarefa
+        
+        # Extrai a tarefa removendo os gatilhos
+        tarefa = texto
+        for gatilho in ["agendar", "agenda", "agende", "anota tarefa", "salvar tarefa", 
+                        "salvar compromisso", "lembrar de", "me lembrar", "marcar compromisso", 
+                        "adicionar na agenda", "marcar na agenda", "colocar na agenda", 
+                        "criar tarefa", "nova tarefa", "novo compromisso", "novo evento",
+                        "anotar compromisso", "registrar tarefa", "registrar compromisso",
+                        "raiden", "por favor", "para mim", "na agenda"]:
+            tarefa = tarefa.replace(gatilho, "")
+        
+        tarefa = tarefa.strip().strip(":").strip().strip(",").strip()
+        
+        if tarefa and len(tarefa) > 2:
+            resultado = salvar_tarefa(tarefa)
+            resposta = f"📅 {resultado}"
+            print(f"   📅 Tarefa salva: '{tarefa}'")
         else:
-            resp = "O que você quer anotar?"
-        return {"texto": resp, "audio": gerar_fala(resp), "expressao": None}
-    if "agenda" in texto or "tarefas" in texto:
-        resp = listar_tarefas()
-        return {"texto": resp, "audio": gerar_fala(resp), "expressao": None}
+            resposta = "Me fala qual tarefa você quer agendar. Ex: 'Raiden, agenda comprar pão'"
+            print(f"   ⚠️ Tarefa vazia. Texto original: '{texto}' | Texto limpo: '{tarefa}'")
+        
+        audio_bytes = gerar_fala(resposta)
+        anotar_no_caderno("Lucas", texto_usuario)
+        anotar_no_caderno("Raiden", resposta)
+        return {"texto": resposta, "audio": audio_bytes, "expressao": None}
+    
+    # ====== DETECÇÃO DIRETA DO GRANDE SÁBIO ======
+    if any(p in texto for p in ["grande sábio", "grande sabio", "sábio", "sabio"]):
+        print("   🎯 Grande Sábio detectado!")
+        threading.Thread(target=executar_pesquisa_profunda, args=(texto,), daemon=True).start()
+        
+        from modulos.grande_sabio import extrair_tema_limpo
+        tema_limpo = extrair_tema_limpo(texto)
+        resposta = f"🫡 Grande Sábio acionado! Vou pesquisar sobre {tema_limpo} em múltiplas fontes e gerar um relatório completo. O arquivo estará em Documentos/Raiden/Grande_Sabio/ em alguns minutos. Pode continuar me usando normalmente enquanto isso."
+        
+        anotar_no_caderno("Lucas", texto_usuario)
+        anotar_no_caderno("Raiden", resposta)
+        return {"texto": resposta, "audio": gerar_fala(resposta), "expressao": None}
+    
+    # ====== PROCESSAMENTO NORMAL COM IA (TOOL CALLING) ======
+    async with httpx.AsyncClient() as client:
+        
+        # Visão computacional
+        gatilhos_visao = ["olha minha tela", "o que eu tô fazendo", "vê isso", "minha tela", "olha isso", "tá vendo"]
+        if any(g in texto for g in gatilhos_visao):
+            print("   👁️ Capturando tela...")
+            descricao = await capturar_tela(client, MODELO_VISAO, chamar_ollama)
+            texto = f"{texto}. [Contexto visual: {descricao}]"
+            print(f"   👁️ Tela: {descricao[:100]}...")
 
-    # YouTube
-    match_musica = re.search(r'(tocar|colocar|toca|coloca)\s+(.+)', texto)
-    if match_musica:
-        termo = match_musica.group(2).strip()
-        if termo:
-            import webbrowser
-            webbrowser.open(f"https://www.youtube.com/results?search_query={termo.replace(' ', '+')}")
-            resp = f"Tocando {termo} no YouTube."
-            return {"texto": resp, "audio": gerar_fala(resp), "expressao": None}
+        # Humor dinâmico
+        delta = 10 if "testando" in texto else 5 if len(texto.split()) < 3 else 2
+        if "por favor" in texto or "obrigado" in texto or "obrigada" in texto:
+            delta = -5
+        irritacao = ajustar_humor(delta)
 
-    # --- IA ---
-    # Ajustar humor
-    delta = 10 if "testando" in texto else 5 if len(texto.split()) < 3 else 2
-    if "por favor" in texto:
-        delta = -5
-    irritacao = ajustar_humor(delta)
+        # Roteamento MoE
+        intencao = await router_intencao(client, texto)
+        modelo = MODELO_CODIGO if intencao == "codigo" else MODELO_CONVERSA
+        print(f"   🧠 Roteador: {intencao} → {modelo}")
 
-    # Roteador inteligente
-    intencao = router_intencao(texto)
-    modelo = MODELO_CODIGO if intencao == "codigo" else MODELO_CONVERSA
-    print(f"🧠 Usando modelo: {modelo} (intenção: {intencao})")
+        historico = ler_ultimas_conversas(4)
+        
+        prompt = f"""[INSTRUÇÃO DE FERRAMENTAS]
+Se o Lucas pedir ações na internet, inclua UM destes JSONs na última linha:
+- Google: {{"tool": "search_google", "args": {{"query": "termo"}}}}
+- YouTube: {{"tool": "search_youtube", "args": {{"query": "termo"}}}}
+- Vídeo específico: {{"tool": "play_youtube_video", "args": {{"query": "termo", "index": 1}}}}
+- Artigo/Dossiê: {{"tool": "grande_sabio", "args": {{"query": "tema"}}}}
+- Resumir vídeo: {{"tool": "devorar_video", "args": {{"query": "termo"}}}}
 
-    historico = ler_ultimas_conversas(4)
-    prompt = f"""[CONTEXTO]
+[CONTEXTO]
 {BIO}
-
 Irritação: {irritacao}/100
-
-Histórico recente:
+Histórico:
 {historico}
 
 Lucas: {texto}
 Raiden:"""
 
-    resposta = chamar_ollama(modelo, prompt)
+        timeout = 120 if modelo == MODELO_CODIGO else 60
+        resposta = await chamar_ollama(client, modelo, prompt, timeout_segundos=timeout)
 
     if not resposta or "[Erro" in resposta:
-        resposta = "Desculpe, não consegui pensar direito."
+        resposta = "Desculpe, não consegui processar isso."
 
-    # Tentar detectar function calling no retorno (ex: uma tool call em JSON)
+    # Intercepta e executa ferramentas (JSON)
     tool_regex = r'\{[^{}]*"tool"\s*:\s*"[^"]+"\s*,\s*"args"\s*:\s*\{[^{}]*\}\s*\}'
     match_tool = re.search(tool_regex, resposta)
+    
     if match_tool:
         try:
             tool_call = json.loads(match_tool.group(0))
             tool_name = tool_call.get("tool")
             args = tool_call.get("args", {})
-            if tool_name == "create_folder":
-                pasta = args.get("path", "")
-                if pasta:
-                    os.makedirs(pasta, exist_ok=True)
-                    resposta = re.sub(tool_regex, '', resposta).strip()
-                    resposta += f"\n[Pasta '{pasta}' criada.]"
+            query = args.get("query", "")
+            
+            print(f"   🔧 Ferramenta: {tool_name} - {query}")
+            
+            if tool_name == "search_google" and query:
+                threading.Thread(target=executar_pesquisa_google, args=(query,), daemon=True).start()
+            elif tool_name == "search_youtube" and query:
+                threading.Thread(target=executar_pesquisa_youtube, args=(query,), daemon=True).start()
+            elif tool_name == "play_youtube_video" and query:
+                index = args.get("index", 1)
+                threading.Thread(target=executar_video_youtube_direto, args=(query, index), daemon=True).start()
+            elif tool_name == "grande_sabio" and query:
+                threading.Thread(target=executar_pesquisa_profunda, args=(query,), daemon=True).start()
+            elif tool_name == "devorar_video" and query:
+                threading.Thread(target=devorar_video_youtube, args=(query,), daemon=True).start()
+            
+            resposta = re.sub(tool_regex, '', resposta).replace("```json", "").replace("```", "").strip()
+            if not resposta:
+                resposta = f"Beleza! Já estou executando a pesquisa sobre {query}."
+                
         except Exception as e:
-            print(f"Erro no function calling: {e}")
+            print(f"   ⚠️ Erro na ferramenta: {e}")
 
-    anotar_no_caderno("Lucas", texto)
+    resposta = limpar_emojis(resposta)
+    anotar_no_caderno("Lucas", texto_usuario)
     anotar_no_caderno("Raiden", resposta)
 
-    audio_bytes = gerar_fala(resposta)
-    return {"texto": resposta, "audio": audio_bytes, "expressao": None}
+    return {"texto": resposta, "audio": gerar_fala(resposta), "expressao": None}
 
-
-# --- Inicialização do FastAPI ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-# --- Modelos de dados para as requisições (ATUALIZADO) ---
+# ========= ROTAS DA API =========
 class MensagemRequest(BaseModel):
     text: Optional[str] = None
     texto: Optional[str] = None
     audio_base64: Optional[str] = None
+    imagem_base64: Optional[str] = None 
 
-class ScreenshotRequest(BaseModel):
-    image_base64: Optional[str] = None
-
-
-# ---------- ROTAS ----------
 @app.post("/chat")
 async def chat_endpoint(req: MensagemRequest):
-    """
-    Recebe texto através dos campos 'text' (padrão ChatVRM) ou 'texto'.
-    Retorna JSON com a resposta e áudio em base64.
-    """
-    # Se vier 'texto' usa ele, senão usa 'text' (tolerante aos dois formatos)
     texto = req.texto or req.text
-    
+
+    # ========= NOVO: PROCESSAMENTO DE IMAGEM =========
+    if req.imagem_base64:
+        from modulos.cerebro import MODELO_VISAO
+        async with httpx.AsyncClient() as client:
+            prompt_visao = texto or "Descreva detalhadamente o que você vê nesta imagem. Se for um print de código, explique o código. Se for uma foto, descreva a cena."
+            resposta = await chamar_ollama(
+                client,
+                MODELO_VISAO,
+                prompt_visao,
+                timeout_segundos=120,
+                imagens=[req.imagem_base64]
+            )
+            resposta = limpar_emojis(resposta)
+            audio_bytes = gerar_fala(resposta)
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8") if audio_bytes else None
+            return {
+                "texto": resposta,
+                "audio_base64": audio_b64,
+                "expressao": None
+            }
+    # =================================================
+
     if not texto and req.audio_base64:
         raise HTTPException(status_code=400, detail="Envie pelo menos o texto.")
-        
-    resultado = processar_mensagem(texto)
+    resultado = await processar_mensagem(texto)
     audio_b64 = base64.b64encode(resultado["audio"]).decode("utf-8") if resultado["audio"] else None
-    
     return {
         "texto": resultado["texto"],
         "audio_base64": audio_b64,
         "expressao": resultado["expressao"]
     }
 
-@app.get("/status")
-async def status():
-    """Retorna o estado atual da Raiden (irritação, etc.)."""
-    c = conn.cursor()
-    c.execute("SELECT valor FROM estado WHERE chave = 'irritacao'")
-    irritacao = c.fetchone()[0]
-    return {"irritacao": irritacao, "ultima_conversa": ler_ultimas_conversas(1)}
+# ========= NOVAS ROTAS DO DASHBOARD =========
 
-@app.post("/proatividade")
-async def verificar_proatividade():
-    """
-    Chamada pelo cliente quando detecta silêncio.
-    O servidor decide se a Raiden deve falar algo.
-    """
-    c = conn.cursor()
-    c.execute("SELECT MAX(timestamp) FROM historico WHERE autor='Lucas'")
-    ultimo = c.fetchone()[0] or 0
-    agora = time.time()
-    if agora - ultimo < TEMPO_SILENCIO_PARA_PROATIVIDADE:
-        return {"deve_falar": False}
+@app.get("/api/dossies")
+async def listar_dossies():
+    """Lista pastas e arquivos do Grande Sábio"""
+    pasta_base = os.path.expanduser("~/Documentos/Raiden/Grande_Sabio")
+    if not os.path.exists(pasta_base):
+        return {"dossies": []}
+    
+    dossies = []
+    for pasta in sorted(os.listdir(pasta_base)):
+        caminho_pasta = os.path.join(pasta_base, pasta)
+        if os.path.isdir(caminho_pasta):
+            relatorio = os.path.join(caminho_pasta, "RELATORIO.md")
+            if os.path.exists(relatorio):
+                with open(relatorio, "r", encoding="utf-8") as f:
+                    conteudo = f.read()
+                dossies.append({
+                    "nome": pasta.replace("_", " "),
+                    "pasta": pasta,
+                    "conteudo": conteudo,
+                    "tamanho": len(conteudo)
+                })
+    
+    return {"dossies": sorted(dossies, key=lambda x: x["nome"])}
 
-    prompt = f"""
-[BIO]
-{BIO}
-Irritação atual: {ajustar_humor(0)}/100.
-O Lucas está em silêncio há mais de 45 segundos. Você (Raiden) deve puxar um assunto tsundere?
-Responda apenas "sim" ou "não"."""
-    decisao = chamar_ollama(MODELO_ROTEADOR, prompt).strip().lower()
-    if "sim" in decisao:
-        historico = ler_ultimas_conversas(4)
-        prompt_fala = f"""[CONTEXTO]
-{BIO}
-Irritação: {ajustar_humor(0)}/100.
-Histórico recente:
-{historico}
-Lucas está ausente. Puxe assunto de forma tsundere.
-Raiden:"""
-        fala = chamar_ollama(MODELO_CONVERSA, prompt_fala)
-        anotar_no_caderno("Raiden", fala)
-        audio_bytes = gerar_fala(fala)
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        return {"deve_falar": True, "texto": fala, "audio_base64": audio_b64}
-    else:
-        return {"deve_falar": False}
+@app.get("/api/dossie/{pasta}")
+async def ler_dossie(pasta: str):
+    """Lê um dossiê específico"""
+    caminho = os.path.expanduser(f"~/Documentos/Raiden/Grande_Sabio/{pasta}/RELATORIO.md")
+    if not os.path.exists(caminho):
+        raise HTTPException(status_code=404, detail="Dossiê não encontrado")
+    
+    with open(caminho, "r", encoding="utf-8") as f:
+        conteudo = f.read()
+    
+    return {"nome": pasta.replace("_", " "), "conteudo": conteudo}
 
-@app.post("/visao")
-async def visao_endpoint(req: ScreenshotRequest = None):
-    """
-    Tira um screenshot da tela do servidor (ou usa imagem enviada pelo cliente)
-    e pede para a Raiden comentar usando modelo multimodal.
-    """
-    if req and req.image_base64:
-        image_data = base64.b64decode(req.image_base64)
-        image = Image.open(io.BytesIO(image_data))
-    else:
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]
-            sct_img = sct.grab(monitor)
-            image = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+@app.get("/api/anotacoes")
+async def listar_anotacoes():
+    """Lista anotações do histórico"""
+    from modulos.memoria import get_db
+    
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT autor, mensagem, timestamp FROM historico WHERE autor = 'Lucas' ORDER BY id DESC LIMIT 50")
+        linhas = c.fetchall()
+    
+    anotacoes = []
+    for linha in linhas:
+        anotacoes.append({
+            "autor": linha["autor"],
+            "mensagem": linha["mensagem"],
+            "data": time.strftime("%d/%m/%Y %H:%M", time.localtime(linha["timestamp"]))
+        })
+    
+    return {"anotacoes": anotacoes}
 
-    buffered = BytesIO()
-    image.save(buffered, format="JPEG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+@app.get("/api/agenda")
+async def listar_agenda():
+    """Lista tarefas da agenda"""
+    from modulos.memoria import get_db
+    
+    with get_db() as conn:
+        c = conn.cursor()
+        c.execute("SELECT tarefa, data FROM agenda ORDER BY id DESC")
+        tarefas = c.fetchall()
+    
+    return {"tarefas": [{"tarefa": t["tarefa"], "data": t["data"]} for t in tarefas]}
 
-    prompt = f"""
-[BIO]
-{BIO}
-O Lucas está na frente do computador. Olhe a tela e faça um comentário tsundere sobre o que ele está fazendo.
-Histórico recente:
-{ler_ultimas_conversas(2)}
-Raiden (comentário curto, no máximo 2 frases):"""
+# ========= ESCUTA CONTÍNUA (COMANDOS COMPLETOS + TIMER) =========
+ultima_resposta = None
+lock_resposta = threading.Lock()
 
-    payload = {
-        "model": MODELO_VISAO,
-        "prompt": prompt,
-        "images": [img_base64],
-        "stream": False
-    }
+def processar_e_responder(comando: str):
+    global ultima_resposta
     try:
-        resp = requests.post(OLLAMA_VISION_URL, json=payload, timeout=30)
-        resp.raise_for_status()
-        comentario = resp.json()["response"]
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        resultado = loop.run_until_complete(processar_mensagem(comando))
+        loop.close()
+        
+        with lock_resposta:
+            ultima_resposta = {
+                "texto": resultado["texto"],
+                "audio_base64": base64.b64encode(resultado["audio"]).decode("utf-8") if resultado.get("audio") else None
+            }
     except Exception as e:
-        print(f"Erro visão: {e}")
-        comentario = "Não consigo ver sua tela agora."
+        print(f"   ⚠️ Erro ao processar: {e}")
 
-    anotar_no_caderno("Raiden", comentario)
-    audio_bytes = gerar_fala(comentario)
-    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-    return {"texto": comentario, "audio_base64": audio_b64}
+def escutar_microfone():
+    global ultima_resposta
+    INATIVO, ATIVO, ANOTANDO = "inativo", "ativo", "anotando"
+    estado = INATIVO
+    ultimo_tempo_fala = 0
+    TEMPO_SILENCIO = 15
 
-# ---------- Inicialização do serviço ----------
+    r = sr.Recognizer()
+    r.pause_threshold = 1.5
+    r.dynamic_energy_threshold = True
+    r.energy_threshold = 300
+
+    with sr.Microphone(sample_rate=16000) as source:
+        r.adjust_for_ambient_noise(source, duration=0.5)
+        print(f"🎤 Raiden pronta. Estado: {estado.upper()} (Timer: {TEMPO_SILENCIO}s)")
+        print(f"   💡 Diga 'Raiden' + comando. Ex: 'Raiden, aumenta o volume em 30%'")
+
+        while True:
+            try:
+                audio = r.listen(source, timeout=1, phrase_time_limit=8)
+                duracao = len(audio.frame_data) / audio.sample_rate
+                if duracao < 0.3:
+                    continue
+
+                texto = r.recognize_google(audio, language="pt-BR").lower()
+                
+                # Correções fonéticas
+                correcoes = {
+                    "happy": "rap",
+                    "heavy": "rap",
+                    "rep": "rap",
+                    "raiden": "raiden",
+                    "rayden": "raiden",
+                    "sabio": "sábio",
+                    "sabia": "sábio"
+                }
+                for errado, certo in correcoes.items():
+                    texto = re.sub(rf'\b{errado}\b', certo, texto)
+
+                print(f"   🎙️ Ouvido: {texto}")
+                agora = time.time()
+
+                # ============================================
+                # COMANDOS DE MÍDIA (FAST-PATH + TIMER RESET)
+                # ============================================
+                
+                # 🔇 MODO MUDO (Volume 0%)
+                if any(g in texto for g in ["mudo", "mutar", "silenciar", "silêncio", "silencio", "modo mudo", "sem som", "desligar som", "tirar o som", "volume zero", "volume 0"]):
+                    print(f"   🔇 Ativando modo mudo (0%)")
+                    threading.Thread(target=ajustar_volume, args=(0, "set"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # 🔊 SAIR DO MUDO / REATIVAR SOM
+                elif any(g in texto for g in ["sair do mudo", "reativar som", "voltar som", "ligar som", "ativar som", "com som", "desmutar", "volume normal", "volta som"]):
+                    print(f"   🔊 Reativando som (10%)")
+                    threading.Thread(target=ajustar_volume, args=(10, "set"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # 🔊 MUTE/UNMUTE NATIVO (alterna)
+                elif any(g in texto for g in ["alternar mudo", "toggle mute", "mute"]):
+                    print(f"   🔇 Alternando mute")
+                    threading.Thread(target=ajustar_volume, args=(0, "mute"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Volume: Aumentar
+                if any(g in texto for g in ["aumentar volume", "aumenta o volume", "aumenta volume", "sobe o volume", "subir volume", "mais volume", "volume mais alto", "volume para cima"]):
+                    porcentagem = extrair_numero_do_texto(texto, padrao=10)
+                    print(f"   🔊 Aumentando volume em {porcentagem}%")
+                    threading.Thread(target=ajustar_volume, args=(porcentagem, "up"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Volume: Diminuir
+                elif any(g in texto for g in ["diminuir volume", "abaixar volume", "abaixa o volume", "baixar volume", "desce o volume", "menos volume", "volume mais baixo", "volume para baixo", "reduzir volume"]):
+                    porcentagem = extrair_numero_do_texto(texto, padrao=10)
+                    print(f"   🔉 Diminuindo volume em {porcentagem}%")
+                    threading.Thread(target=ajustar_volume, args=(porcentagem, "down"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Volume: Definir valor exato
+                elif any(g in texto for g in ["volume em", "definir volume", "colocar volume", "deixar volume", "volume para", "volume no", "definir volume para"]):
+                    porcentagem = extrair_numero_do_texto(texto, padrao=50, permitir_zero=True)
+                    print(f"   🎚️ Definindo volume para {porcentagem}%")
+                    threading.Thread(target=ajustar_volume, args=(porcentagem, "set"), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Mídia: Play/Pause
+                elif any(g in texto for g in ["pausar", "despausar", "parar a música", "pausar a música", "continuar a música", "continuar música", "tocar música", "play", "pause"]):
+                    threading.Thread(target=controlar_midia, args=("play-pause",), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Mídia: Próxima faixa
+                elif any(g in texto for g in ["próxima música", "próxima faixa", "pular música", "pular faixa", "passar a música", "avançar música", "próximo", "skip"]):
+                    threading.Thread(target=controlar_midia, args=("next",), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Mídia: Faixa anterior
+                elif any(g in texto for g in ["música anterior", "faixa anterior", "voltar música", "voltar a música", "música passada", "anterior", "retroceder"]):
+                    threading.Thread(target=controlar_midia, args=("previous",), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+                
+                # Mídia: Parar completamente
+                elif any(g in texto for g in ["parar tudo", "parar player", "encerrar música"]):
+                    threading.Thread(target=controlar_midia, args=("stop",), daemon=True).start()
+                    ultimo_tempo_fala = agora
+                    continue
+
+                # ============================================
+                # MODO DITADO (ANOTAÇÃO)
+                # ============================================
+                if estado == ANOTANDO:
+                    gatilhos_fechar = [
+                        "parar de anotar", "concluir anotação", "encerrar anotação",
+                        "parar ditado", "finalizar anotação", "fechar anotação",
+                        "sair do modo ditado", "parar de escrever"
+                    ]
+                    encerrou = False
+                    texto_para_digitar = texto
+
+                    for g in gatilhos_fechar:
+                        if g in texto:
+                            encerrou = True
+                            texto_para_digitar = texto.split(g)[0].strip()
+                            break
+                    
+                    if texto_para_digitar:
+                        threading.Thread(target=digitar_texto, args=(texto_para_digitar,), daemon=True).start()
+                            
+                    if encerrou:
+                        estado = INATIVO
+                        ultimo_tempo_fala = agora
+                        print("   📝 Anotação concluída. Voltando ao estado INATIVO.")
+                        
+                        audio_bytes = gerar_fala("Pronto, anotação encerrada e salva.")
+                        with lock_resposta:
+                            ultima_resposta = {
+                                "texto": "Anotação encerrada e salva.",
+                                "audio_base64": base64.b64encode(audio_bytes).decode("utf-8")
+                            }
+                    else:
+                        ultimo_tempo_fala = agora
+                    continue
+
+                # ============================================
+                # ESTADOS INATIVO E ATIVO
+                # ============================================
+                if estado == INATIVO:
+                    if "raiden" in texto:
+                        comando_puro = texto.replace("raiden", "").strip()
+                        
+                        # Modo anotação/ditado
+                        gatilhos_anotar = [
+                            "anotar", "abrir anotação", "iniciar anotação",
+                            "começar anotação", "modo ditado", "abrir bloco de notas",
+                            "abrir o editor", "começar a anotar", "iniciar ditado"
+                        ]
+                        if any(comando_puro.startswith(g) for g in gatilhos_anotar) or any(g in comando_puro for g in gatilhos_anotar):
+                            print("   📝 Abrindo editor para ditado...")
+                            
+                            if abrir_editor():
+                                time.sleep(2)
+                                estado = ANOTANDO
+                                ultimo_tempo_fala = agora
+                                print("   📝 Estado: ANOTANDO (ditado ativo)")
+                                
+                                audio_bytes = gerar_fala("Editor aberto. Pode começar a ditar. Quando terminar, diga: parar de anotar.")
+                                with lock_resposta:
+                                    ultima_resposta = {
+                                        "texto": "Editor aberto. Pode começar a ditar.",
+                                        "audio_base64": base64.b64encode(audio_bytes).decode("utf-8")
+                                    }
+                                continue
+                            else:
+                                print("   ⚠️ Nenhum editor de texto encontrado.")
+                                audio_bytes = gerar_fala("Nenhum editor de texto encontrado. Instale o gedit ou gnome-text-editor.")
+                                with lock_resposta:
+                                    ultima_resposta = {
+                                        "texto": "Nenhum editor de texto encontrado.",
+                                        "audio_base64": base64.b64encode(audio_bytes).decode("utf-8")
+                                    }
+                                continue
+                        
+                        # Comando normal
+                        if comando_puro:
+                            print(f"   ✅ Acordando... Comando: {comando_puro}")
+                            threading.Thread(target=processar_e_responder, args=(comando_puro,), daemon=True).start()
+                        
+                        estado = ATIVO
+                        ultimo_tempo_fala = agora
+                        print(f"   🟢 Estado: ATIVO (timer: {TEMPO_SILENCIO}s)")
+                else:
+                    # Estado ATIVO - verifica timeout
+                    if agora - ultimo_tempo_fala > TEMPO_SILENCIO:
+                        estado = INATIVO
+                        print(f"   🔴 Estado: INATIVO ({TEMPO_SILENCIO}s de silêncio)")
+                        continue
+                    
+                    if texto.strip() and len(texto.split()) >= 1:
+                        print(f"   ✅ Processando conversa: {texto}")
+                        threading.Thread(target=processar_e_responder, args=(texto,), daemon=True).start()
+                        ultimo_tempo_fala = agora
+                        print(f"   ⏱️ Timer resetado ({TEMPO_SILENCIO}s)")
+
+            except sr.WaitTimeoutError:
+                if estado == ATIVO and time.time() - ultimo_tempo_fala > TEMPO_SILENCIO:
+                    estado = INATIVO
+                    print(f"   🔴 Estado: INATIVO (timeout)")
+            except sr.UnknownValueError:
+                if estado == ATIVO and time.time() - ultimo_tempo_fala > TEMPO_SILENCIO:
+                    estado = INATIVO
+                    print(f"   🔴 Estado: INATIVO (silêncio)")
+            except Exception as e:
+                print(f"   ⚠️ Erro no microfone: {e}")
+                time.sleep(0.5)
+
+@app.on_event("startup")
+async def iniciar_escuta():
+    threading.Thread(target=escutar_microfone, daemon=True).start()
+
+@app.get("/proximo_audio")
+async def proximo_audio():
+    global ultima_resposta
+    with lock_resposta:
+        if ultima_resposta:
+            resp = ultima_resposta
+            ultima_resposta = None
+            return resp
+    return {"texto": None, "audio_base64": None}
+
+# ========= PONTO DE ENTRADA =========
 if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("   🎌 RAIDEN - Assistente Virtual Linux")
+    print("="*60)
+    print(f"   🧠 MoE: Llama3.2 → Roteador")
+    print(f"   🎭 MoE: RaidenNova → Conversa")
+    print(f"   🔧 MoE: Qwen2.5-7B → Código/Ferramentas")
+    print(f"   👁️ MoE: MiniCPM-V → Visão")
+    print(f"   🔊 Volume: 0-100% dinâmico + Mudo")
+    print(f"   🔇 Mudo: 'mudo', 'silenciar', 'volume zero'")
+    print(f"   🔊 Reativar: 'voltar som', 'reativar som'")
+    print(f"   ⏯️ Mídia: Play/Pause/Next/Previous/Stop")
+    print(f"   📅 Agenda: 'agenda [tarefa]', 'quais são minhas tarefas?'")
+    print(f"   ⏱️ Timer: Resetado em todos os comandos")
+    print(f"   📊 Dashboard: /api/dossies | /api/anotacoes | /api/agenda")
+    print("="*60 + "\n")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

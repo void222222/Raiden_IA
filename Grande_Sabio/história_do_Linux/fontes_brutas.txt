@@ -1,0 +1,313 @@
+
+============================================================
+URL: https://informatecdigital.com/pt/História-do-Sistema-Operacional-Linux-Um-Guia-Completo/
+============================================================
+História do Sistema Operacional Linux: Um Guia Completo
+Informatec Digital » Linux » História do Sistema Operacional Linux: Um Guia Completo
+Linux é um  sistema operacional de código aberto desenvolvido por Linus Torvalds em 1991.
+Oferece alta segurança e estabilidade, tornando-o ideal para servidores e dispositivos móveis.
+Sua natureza colaborativa permite que milhões de desenvolvedores contribuam para sua evolução.
+Existem diversas distribuições Linux adaptadas às diferentes necessidades e preferências dos usuários.
+História do Sistema Operacional Linux: Um Guia Completo
+O que é um  Sistema Operativo?
+Os sistemas operacionais (SO) são compostos de software e programas que facilitam a interação entre o hardware de um computador e seus usuários, atuando como seu cérebro no gerenciamento de recursos, na execução de aplicativos e na facilitação da comunicação entre seus componentes. Sistemasoperativos
+Os sistemas operacionais fornecem uma interface para os usuários interagirem com os vários componentes físicos e lógicos de um computador, permitindo que eles executem tarefas como salvar arquivos, navegar na web ou executar aplicativos com eficiência. Sem eles, os dispositivos modernos seriam quase impossíveis de usar; De sistemas operacionais populares como Windows e macOS até opções mais especializadas como Linux, software avançado é essencial para gerenciar nossos dispositivos de forma eficaz.
+Quais sistemas operacionais existem?
+Existem vários sistemas operacionais para computadores e outros dispositivos eletrônicos; Entre os sistemas mais conhecidos estão Windows, macOS e Linux. Linuxe Unix
+Microsoft Windows É um sistema operacional amplamente utilizado em computadores pessoais para uso pessoal. Ele apresenta uma interface gráfica de usuário intuitiva e oferece acesso a uma variedade de programas e aplicativos compatíveis.
+MacOS É o único sistema operacional da Apple usado em seus produtos, como MacBooks e iMacs, e se caracteriza por sua elegância experiência do usuário e fortes medidas de segurança.
+Linux, um sistema operacional de código aberto, ganhou muita aceitação ao longo do tempo devido à sua flexibilidade e capacidade de personalização, atraindo usuários por sua versatilidade e adaptabilidade. O Linux pode ser encontrado em celulares, servidores e dispositivos baseados na web devido à sua segurança e estabilidade, realmente nos abençoando com muitas oportunidades.
+Os sistemas operacionais mencionados aqui são apenas alguns dos muitos disponíveis atualmente, cada um deles com recursos especiais que devem ajudar a determinar o processo de seleção com base nas necessidades e requisitos do usuário.
+A história do Linux é fascinante e cheia de intrigas. Sua jornada começou na década de 1960, quando novos sistemas operacionais surgiram. Mas em 1991, um ambicioso estudante finlandês conhecido como Linus Torvalds decidiu criar seu próprio sistema operacional baseado em UNIX. Materialde referência técnica
+Torvalds primeiro disponibilizou o compon
+
+============================================================
+URL: https://brasilescola.uol.com.br/informatica/historia-do-linux.htm
+============================================================
+Usando a nota do Enem
+Como calcular a nota do Enem
+Certificado do Encceja
+Encceja Ensino Fundamental
+Como é a prova do Encceja
+Provas e gabaritos do Encceja
+Exercícios de Biologia
+Exercícios de Geografia
+Exercícios de Gramática
+Exercícios de História do Brasil
+Exercícios de História Geral
+Exercícios de Literatura
+Exercícios de Matemática
+Exercícios de Química
+Exercícios de Redação
+Cronograma de estudos
+Assistente de dever de casa
+Conversor de números romanos
+Simulados Vestibulares
+Simulado Olimpíadas de Português
+Simpatias de festas juninas
+Itens da Festa Junina
+Por que o céu é azul?
+Primeira guerra mundial
+O nome Linux surgiu da mistura de Linus + Unix. Linus é o nome do criador do Linux, Linus Torvalds. E Unix, é o nome de um sistema operacional de grande porte, no qual contaremos sua história agora, para que você entenda melhor a do Linux.
+
+A origem do Unix tem ligação com o sistema operacional Multics, projetado na década de 1960. Esse projeto era realizado pelo Massachusets Institute of Technology (MIT), pela General Eletric (GE) e pelos laboratórios Bell (Bell Labs) e American Telephone na Telegraph (AT&T). A intenção era de que o Multics tivesse características de tempo compartilhado (vários usuários compartilhando os recursos de um único computador), sendo assim, o sistema mais arrojado da época. Em 1969, já exisita uma versão do Multics rodando num computador GE645.]
+
+Ken Thompsom era um pesquisador do Multics e trabalhava na Bell Labs. No entanto, a empresa se retirou do projeto tempos depois, mas ele continuou seus estudos no sistema. Desde então, sua idéia não era continuar no Multics original e sim criar algo menor, mas que conservasse as idéias básicas do sistema. A partir daí, começa a saga do sistema Unix. Brian Kernighan, também pesquisador da Bell Labs, foi quem deu esse nome.
+
+Em 1973, outro pesquisador da Bell Labs, Dennis Ritchie, rescreveu todo o sistema Unix numa linguagem de alto nível, chamada C, desenvolvida por ele mesmo. Por causa disso, o sistema passou a ter grande aceitação por usuários externos à Bell Labs.
+
+Entre 1977 e 1981, a AT&T, alterou o Unix, fazendo algumas mudanças particulares e lançou o System III. Em 1983, após mais uma série de modificações, foi lançado o conhecido Unix System IV, que passou a ser vendido. Até hoje esse sistema é usado no mercado, tornando-se o padrão internacional do Unix. Esse sistema é comercializado por empresas como IBM, HP, Sun, etc. O Unix, é um sistema operacional muito caro e é usado em computadores poderosos (como mainframes) por diversas multinacionais.
+
+Qual a relação entre o Unix e o Linux, ou melhor, entre o Unix e Linus Torvalds?
+
+Para responder essa pergunta, é necessário falar de outro sistema operacional, o Minix. O Minix é uma versão do Unix, porém, gratuita e com o código fonte disponível. Isso significa que qualquer programador experiente pode fazer alterações nele. Ele foi criado originalmente para uso educacional, para quem quisesse estudar o Unix "em casa". No 
+
+============================================================
+URL: https://pt.wikipedia.org/wiki/História_do_Linux
+============================================================
+Eventos que levaram à criação
+Linux sob a licença GNU GPL
+Controvérsia quanto à nomenclatura GNU/Linux
+Novo desenvolvimento
+Alternar a subsecção Novo desenvolvimento
+Núcleo
+Comunidade
+O Open Source Development Labs e a Linux Foundation
+Empresas
+O Open Source Development Labs e a Linux Foundation
+Controvérsia sobre o Linux
+Alternar a subsecção Controvérsia sobre o Linux
+"O Linux é obsoleto"
+Samizdat
+Competição com a Microsoft
+Distribuições Linux
+SCO
+Direitos sobre a marca
+Competição com a Microsoft
+Direitos sobre a marca
+Pequeno
+Padrão
+Grande
+Automático
+Claro
+Escuro
+A História do Linux começou em 1991 com o início de um projeto pessoal de um estudante finlandês chamado Linus Torvalds com o intuito de criar um novo núcleo de sistema operacional.
+Desde então, o núcleo Linux resultante foi marcado por um crescimento constante ao longo de sua história. A partir do lançamento inicial de seu código-fonte em 1991, cresceu de um pequeno grupo de arquivos em C sob uma proibitiva licença de distribuição comercial, em 1991, a possuir mais de 370 megabytes de fonte sob a licença GPL.[1]
+Eventos que levaram à criação
+O sistema operativo Unix foi concebido e implementado por Ken Thompson e Dennis Ritchie (ambos dos AT&T Bell Laboratories) em 1969 e primeiramente lançado em 1970. Sua disponibilidade e portabilidade fizeram com que fosse amplamente adotado, copiado e modificado por instituições acadêmicas e negócios. Seu design influenciou autores de outros sistemas.[carece de fontes]
+Em 1983, Richard Stallman começou o Projeto GNU com o objetivo de criar um Sistema operacional tipo Unix gratuito e livre.[2] Como parte desse trabalho, ele escreveu a GNU General Public License (GPL). No começo dos anos 1990, havia software quase suficiente para se criar um sistema operacional completo. Entretanto, o núcleo GNU, chamado de Hurd, não conseguiu atrair atenção suficiente dos desenvolvedores, deixando o GNU incompleto.
+Outro projeto de sistema operacional livre, inicialmente lançado em 1977, foi o Berkeley Software Distribution (BSD). Foi desenvolvido pela Universidade da Califórnia em Berkeley a partir da versão 6 do Unix da AT&T. Uma vez que o BSD continha código do Unix do qual a AT&T era proprietária, a AT&T entrou com um processo (USL v. BSDi) no começo dos anos 1990 contra a Universidade da Califórnia. Isso limitou fortemente o desenvolvimento e adoção do BSD.[3][4]
+Em 1985, a Intel lançou o 80386, o primeiro microprocessador x86 com conjunto de instruções de 32-bit e MMU com paginação.[5]
+Em 1986, Maurice J. Bach, of AT&T Bell Labs, publicou The Design of the UNIX Operating System.[6] Essa descrição definitiva cobria principalmente o núcleo System V versão 2, com algumas novas características da versão 3 e do BSD.
+O MINIX, um sistema operacional tipo Unix pensada para uso acadêmico, foi lançado por Andrew S. Tanenbaum em 1987. Se bem o código-fonte do sistema estava disponível, modificações e redistribuições não era permitidas. Ademais, o design do MINIX de 16-b
+
+============================================================
+URL: https://sempreupdate.com.br/historia-das-distribuicoes-linux/
+============================================================
+Linux
+
+	Tutoriais Linux
+	Comandos Linux
+	Distribuições Linux
+	Drivers para Linux
+	Kernel Linux
+	Componente do sistema
+	Software para Linux
+	Linux Foundation
+Componente do sistema
+Tecnologia
+
+	Hardware
+	Mobile
+	Inteligência Artificial
+	Desenvolvedores
+	Eventos
+	Google
+Inteligência Artificial
+Free Software FoundationNovo
+Desvendando a história das distribuições Linux: como Ubuntu, Fedora e Debian se tornaram os 3 gigantes do código aberto
+Como três distribuições moldaram o passado, presente e futuro do Linux
+A história das distribuições Linux é uma das jornadas mais fascinantes da computação moderna. Do nascimento do Kernel por Linus Torvalds à ascensão de gigantes como Ubuntu, Fedora e Debian, essa trajetória revela não só a evolução técnica do sistema operacional, mas também um movimento social baseado em liberdade, colaboração e inovação.
+Neste artigo, vamos mergulhar profundamente nas origens, filosofias, marcos e impactos dessas três distribuições que moldaram o Linux como o conhecemos. Vamos explicar tudo de forma acessível, analisando os bastidores técnicos, históricos e culturais que definem a evolução do Linux.
+As origens do Linux e a necessidade das distribuições
+O Linux nasceu em 1991, quando Linus Torvalds publicou a primeira versão do Kernel como um hobby. A ideia era criar um sistema operacional similar ao UNIX, mas gratuito e aberto para colaboração. Porém, o Kernel sozinho não forma um sistema operacional completo — faltavam os componentes de usuário, como shells, compiladores, editores e utilitários básicos.
+Foi aí que o projeto GNU, iniciado por Richard Stallman na década de 1980, se tornou essencial. O GNU fornecia a infraestrutura de software livre necessária (como o compilador gcc e o shell bash) para completar um sistema funcional. Essa união deu origem ao GNU/Linux.
+Entretanto, juntar tudo manualmente era complexo. Para resolver esse problema, surgiram as distribuições Linux, sistemas que empacotam o Kernel e o ecossistema de softwares GNU, organizando tudo para facilitar a instalação, atualização e manutenção.
+Para iniciantes: o que é uma distribuição Linux?
+Uma distribuição Linux (ou distro) é como uma “versão personalizada” de um mesmo motor — o Kernel Linux. Imagine que você tem um motor de carro (o Kernel) e várias montadoras criam modelos diferentes com base nele: esportivos, populares, SUVs. As distros são essas montadoras, que combinam o Kernel com pacotes, interfaces gráficas, ferramentas administrativas e políticas próprias.
+Exemplos famosos são Ubuntu, Fedora, Debian, Arch e openSUSE.
+Repositórios são como lojas de aplicativos onde as distros guardam seus pacotes. Cada distro tem sua própria filosofia, público-alvo e ritmo de atualizações.
+Debian: o pilar da comunidade e da liberdade
+O Debian nasceu em 1993 pelas mãos de Ian Murdock. O nome une “Debra” (sua namorada) e “Ian”. Desde o início, o projeto foi fundado com base na filosofia do Software Livre, sendo uma das primeiras distribuições a ter uma governança com
+
+============================================================
+URL: https://pt.wikipedia.org/wiki/História_do_Linux
+============================================================
+Eventos que levaram à criação
+Linux sob a licença GNU GPL
+Controvérsia quanto à nomenclatura GNU/Linux
+Novo desenvolvimento
+Alternar a subsecção Novo desenvolvimento
+Núcleo
+Comunidade
+O Open Source Development Labs e a Linux Foundation
+Empresas
+O Open Source Development Labs e a Linux Foundation
+Controvérsia sobre o Linux
+Alternar a subsecção Controvérsia sobre o Linux
+"O Linux é obsoleto"
+Samizdat
+Competição com a Microsoft
+Distribuições Linux
+SCO
+Direitos sobre a marca
+Competição com a Microsoft
+Direitos sobre a marca
+Pequeno
+Padrão
+Grande
+Automático
+Claro
+Escuro
+A História do Linux começou em 1991 com o início de um projeto pessoal de um estudante finlandês chamado Linus Torvalds com o intuito de criar um novo núcleo de sistema operacional.
+Desde então, o núcleo Linux resultante foi marcado por um crescimento constante ao longo de sua história. A partir do lançamento inicial de seu código-fonte em 1991, cresceu de um pequeno grupo de arquivos em C sob uma proibitiva licença de distribuição comercial, em 1991, a possuir mais de 370 megabytes de fonte sob a licença GPL.[1]
+Eventos que levaram à criação
+O sistema operativo Unix foi concebido e implementado por Ken Thompson e Dennis Ritchie (ambos dos AT&T Bell Laboratories) em 1969 e primeiramente lançado em 1970. Sua disponibilidade e portabilidade fizeram com que fosse amplamente adotado, copiado e modificado por instituições acadêmicas e negócios. Seu design influenciou autores de outros sistemas.[carece de fontes]
+Em 1983, Richard Stallman começou o Projeto GNU com o objetivo de criar um Sistema operacional tipo Unix gratuito e livre.[2] Como parte desse trabalho, ele escreveu a GNU General Public License (GPL). No começo dos anos 1990, havia software quase suficiente para se criar um sistema operacional completo. Entretanto, o núcleo GNU, chamado de Hurd, não conseguiu atrair atenção suficiente dos desenvolvedores, deixando o GNU incompleto.
+Outro projeto de sistema operacional livre, inicialmente lançado em 1977, foi o Berkeley Software Distribution (BSD). Foi desenvolvido pela Universidade da Califórnia em Berkeley a partir da versão 6 do Unix da AT&T. Uma vez que o BSD continha código do Unix do qual a AT&T era proprietária, a AT&T entrou com um processo (USL v. BSDi) no começo dos anos 1990 contra a Universidade da Califórnia. Isso limitou fortemente o desenvolvimento e adoção do BSD.[3][4]
+Em 1985, a Intel lançou o 80386, o primeiro microprocessador x86 com conjunto de instruções de 32-bit e MMU com paginação.[5]
+Em 1986, Maurice J. Bach, of AT&T Bell Labs, publicou The Design of the UNIX Operating System.[6] Essa descrição definitiva cobria principalmente o núcleo System V versão 2, com algumas novas características da versão 3 e do BSD.
+O MINIX, um sistema operacional tipo Unix pensada para uso acadêmico, foi lançado por Andrew S. Tanenbaum em 1987. Se bem o código-fonte do sistema estava disponível, modificações e redistribuições não era permitidas. Ademais, o design do MINIX de 16-b
+
+============================================================
+URL: https://informatecdigital.com/pt/História-do-Sistema-Operacional-Linux-Um-Guia-Completo/
+============================================================
+História do Sistema Operacional Linux: Um Guia Completo
+Informatec Digital » Linux » História do Sistema Operacional Linux: Um Guia Completo
+Linux é um  sistema operacional de código aberto desenvolvido por Linus Torvalds em 1991.
+Oferece alta segurança e estabilidade, tornando-o ideal para servidores e dispositivos móveis.
+Sua natureza colaborativa permite que milhões de desenvolvedores contribuam para sua evolução.
+Existem diversas distribuições Linux adaptadas às diferentes necessidades e preferências dos usuários.
+História do Sistema Operacional Linux: Um Guia Completo
+O que é um  Sistema Operativo?
+Os sistemas operacionais (SO) são compostos de software e programas que facilitam a interação entre o hardware de um computador e seus usuários, atuando como seu cérebro no gerenciamento de recursos, na execução de aplicativos e na facilitação da comunicação entre seus componentes. Sistemasoperacionais
+Os sistemas operacionais fornecem uma interface para os usuários interagirem com os vários componentes físicos e lógicos de um computador, permitindo que eles executem tarefas como salvar arquivos, navegar na web ou executar aplicativos com eficiência. Sem eles, os dispositivos modernos seriam quase impossíveis de usar; De sistemas operacionais populares como Windows e macOS até opções mais especializadas como Linux, software avançado é essencial para gerenciar nossos dispositivos de forma eficaz.
+Quais sistemas operacionais existem?
+Existem vários sistemas operacionais para computadores e outros dispositivos eletrônicos; Entre os sistemas mais conhecidos estão Windows, macOS e Linux. Linuxe Unix
+Microsoft Windows É um sistema operacional amplamente utilizado em computadores pessoais para uso pessoal. Ele apresenta uma interface gráfica de usuário intuitiva e oferece acesso a uma variedade de programas e aplicativos compatíveis.
+MacOS É o único sistema operacional da Apple usado em seus produtos, como MacBooks e iMacs, e se caracteriza por sua elegância experiência do usuário e fortes medidas de segurança.
+Linux, um sistema operacional de código aberto, ganhou muita aceitação ao longo do tempo devido à sua flexibilidade e capacidade de personalização, atraindo usuários por sua versatilidade e adaptabilidade. O Linux pode ser encontrado em celulares, servidores e dispositivos baseados na web devido à sua segurança e estabilidade, realmente nos abençoando com muitas oportunidades.
+Os sistemas operacionais mencionados aqui são apenas alguns dos muitos disponíveis atualmente, cada um deles com recursos especiais que devem ajudar a determinar o processo de seleção com base nas necessidades e requisitos do usuário.
+A história do Linux é fascinante e cheia de intrigas. Sua jornada começou na década de 1960, quando novos sistemas operacionais surgiram. Mas em 1991, um ambicioso estudante finlandês conhecido como Linus Torvalds decidiu criar seu próprio sistema operacional baseado em UNIX. Materialde referência técnica
+Torvalds primeiro disponibilizou o comp
+
+============================================================
+URL: https://www.fortunebusinessinsights.com/pt/linux-operating-system-market-103037
+============================================================
+www.fortunebusinessinsights.com
+Performing security verification
+This website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.
+Verification successful. Waiting for www.fortunebusinessinsights.com to respond
+
+============================================================
+URL: https://repositorio.uema.br/handle/123456789/5098
+============================================================
+Comunidades e coleções
+Navegar nos Itens por:
+Receber atualizações por e-mail
+O UEMA Repositório preserva e provê acesso fácil e aberto a todos os tipos de objetos digitais, incluindo: textos, imagens, vídeos e conjuntos de dados.
+BIBLIOTECA DIGITAL UEMA
+CENTRO DE CIÊNCIAS TECNOLÓGICAS - CCT
+CURSOS DE GRADUAÇÃO CCT - UEMA
+CURSO DE BACHARELADO EM  ENGENHARIA DE COMPUTAÇÃO - CCT UEMA
+Curso de Bacharelado em Engenharia de Computação - CCT UEMA - Monografias
+Os itens no repositório estão protegidos por copyright, com todos os direitos reservados, salvo quando é indicado o contrário.
+DSpace Software Copyright © 2002-2010 Duraspace - Contato com a administração
+
+============================================================
+URL: https://pt.wikipedia.org/wiki/História_do_Linux
+============================================================
+Eventos que levaram à criação
+Linux sob a licença GNU GPL
+Controvérsia quanto à nomenclatura GNU/Linux
+Novo desenvolvimento
+Alternar a subsecção Novo desenvolvimento
+Núcleo
+Comunidade
+O Open Source Development Labs e a Linux Foundation
+Empresas
+O Open Source Development Labs e a Linux Foundation
+Controvérsia sobre o Linux
+Alternar a subsecção Controvérsia sobre o Linux
+"O Linux é obsoleto"
+Samizdat
+Competição com a Microsoft
+Distribuições Linux
+SCO
+Direitos sobre a marca
+Competição com a Microsoft
+Direitos sobre a marca
+Pequeno
+Padrão
+Grande
+Automático
+Claro
+Escuro
+A História do Linux começou em 1991 com o início de um projeto pessoal de um estudante finlandês chamado Linus Torvalds com o intuito de criar um novo núcleo de sistema operacional.
+Desde então, o núcleo Linux resultante foi marcado por um crescimento constante ao longo de sua história. A partir do lançamento inicial de seu código-fonte em 1991, cresceu de um pequeno grupo de arquivos em C sob uma proibitiva licença de distribuição comercial, em 1991, a possuir mais de 370 megabytes de fonte sob a licença GPL.[1]
+Eventos que levaram à criação
+O sistema operativo Unix foi concebido e implementado por Ken Thompson e Dennis Ritchie (ambos dos AT&T Bell Laboratories) em 1969 e primeiramente lançado em 1970. Sua disponibilidade e portabilidade fizeram com que fosse amplamente adotado, copiado e modificado por instituições acadêmicas e negócios. Seu design influenciou autores de outros sistemas.[carece de fontes]
+Em 1983, Richard Stallman começou o Projeto GNU com o objetivo de criar um Sistema operacional tipo Unix gratuito e livre.[2] Como parte desse trabalho, ele escreveu a GNU General Public License (GPL). No começo dos anos 1990, havia software quase suficiente para se criar um sistema operacional completo. Entretanto, o núcleo GNU, chamado de Hurd, não conseguiu atrair atenção suficiente dos desenvolvedores, deixando o GNU incompleto.
+Outro projeto de sistema operacional livre, inicialmente lançado em 1977, foi o Berkeley Software Distribution (BSD). Foi desenvolvido pela Universidade da Califórnia em Berkeley a partir da versão 6 do Unix da AT&T. Uma vez que o BSD continha código do Unix do qual a AT&T era proprietária, a AT&T entrou com um processo (USL v. BSDi) no começo dos anos 1990 contra a Universidade da Califórnia. Isso limitou fortemente o desenvolvimento e adoção do BSD.[3][4]
+Em 1985, a Intel lançou o 80386, o primeiro microprocessador x86 com conjunto de instruções de 32-bit e MMU com paginação.[5]
+Em 1986, Maurice J. Bach, of AT&T Bell Labs, publicou The Design of the UNIX Operating System.[6] Essa descrição definitiva cobria principalmente o núcleo System V versão 2, com algumas novas características da versão 3 e do BSD.
+O MINIX, um sistema operacional tipo Unix pensada para uso acadêmico, foi lançado por Andrew S. Tanenbaum em 1987. Se bem o código-fonte do sistema estava disponível, modificações e redistribuições não era permitidas. Ademais, o design do MINIX de 16-b
+
+============================================================
+URL: https://medium.com/@e_moreira/a-história-do-linux-uma-trajetória-de-inovação-e-colaboração-bff7fd89e455
+============================================================
+A História do Linux: Uma Trajetória de Inovação e Colaboração
+O Linux constitui um dos marcos mais relevantes da engenharia de software no século XXI. Originado como um projeto de código aberto liderado por Linus Torvalds, o sistema operacional evoluiu de forma colaborativa, integrando avanços teóricos e práticos que redefiniram os paradigmas de desenvolvimento, distribuição e utilização de sistemas computacionais.
+Este artigo examina, de maneira sistemática, os principais episódios históricos que marcaram a trajetória do Linux, analisando suas origens, desenvolvimento técnico, expansão institucional e influência sobre o ecossistema tecnológico contemporâneo.
+2. Antecedentes Históricos
+2.1 Contexto da Computação na Década de 1980
+Na década de 1980, a indústria de computação era dominada por sistemas operacionais proprietários, como o MS-DOS e variantes de UNIX desenvolvidas por AT&T e suas licenciadas. Embora o UNIX oferecesse um modelo de arquitetura modular e portabilidade, seu código-fonte fechado limitava o acesso de instituições de pesquisa e de indivíduos interessados em modificar ou adaptar o sistema às suas próprias necessidades.
+2.2 O Movimento de Software Livre
+Paralelamente, o movimento de software livre, impulsionado por Richard Stallman e pela Free Software Foundation (FSF), defendia a liberdade de uso, estudo, modificação e redistribuição do código-fonte. Essa filosofia inspirou a criação do projeto GNU, que tinha como objetivo construir um sistema operacional completamente livre. Contudo, o projeto ainda carecia de um kernel funcional.
+3. O Nascimento do Linux
+3.1 A Motivação de Linus Torvalds
+Em 1990, Linus Torvalds, então estudante de computação na Universidade de Helsinque, iniciou o desenvolvimento de um kernel como projeto pessoal. Motivado pela curiosidade técnica e pela limitação de alternativas acessíveis, Torvalds buscava criar um sistema semelhante ao UNIX que pudesse rodar em hardware de baixo custo.
+Em 25 de agosto de 1991, anunciou publicamente o início do projeto no grupo de discussão comp.os.minix, descrevendo-o como um kernel livre desenvolvido inicialmente para uso pessoal.
+3.2 Licenciamento e Arquitetura
+O kernel passou a ser distribuído sob a GNU General Public License (GPL) versão 2, garantindo que o código permanecesse livre e que versões derivadas mantivessem a mesma licença. Inicialmente projetado para a arquitetura Intel i386, o Linux rapidamente expandiu o suporte para diversas arquiteturas, incluindo ARM, PowerPC e MIPS.
+4. Desenvolvimento e Evolução
+4.1 O Modelo de Desenvolvimento Colaborativo
+A partir de 1992, desenvolvedores de todo o mundo passaram a contribuir com correções e melhorias. Consolidou-se um modelo distribuído de desenvolvimento baseado em envio de patches, revisão por pares e manutenção hierarquizada por subsistemas.
+Esse modelo se tornou referência para projetos de código aberto, estabelecendo práticas robustas de controle de qualidade e ciclos regulares de lançamento.
+4.2 Integração com
+
+============================================================
+URL: https://pt.wikipedia.org/wiki/História_do_software_livre
+============================================================
+Início
+Alternar a subsecção Início
+Surgimento do software restrito e berço do software livre
+O nascimento do movimento do software livre
+Surgimento do software restrito e berço do software livre
+O nascimento do movimento do software livre
+Eric Raymond, a criação da OSI e o restante da história
+Software livre no Brasil
+História do software livre
+Pequeno
+Padrão
+Grande
+Automático
+Claro
+Escuro
+Esta é uma visão estilo linha do tempo sobre como iniciou o conceito do software livre e evoluiu ao longo do tempo. A principal referência para o texto é o material disponível no Centro de Competência de Software Livre (IME/USP) intitulado Software Livre e Propriedade Intelectual: Aspectos Jurídicos, Licenças e Modelos de Negócio.[1]
+Na década de 60, os computadores de grande porte, utilizados quase exclusivamente em grandes empresas e instituições governamentais, dominavam o mercado da Computação. Nesta época, não era comum do ponto de vista comercial a ideia do software como algo separado do hardware. O software era entregue junto com o código-fonte ou, em muitas vezes, apenas o código-fonte, pois os utilizadores frequentemente modificavam-o para corrigir falhas ou adicionar novos recursos.[2] Existiam grupos de usuários que compartilhavam código e informações. A IBM, em 1967, já distribuia um sistema operacional para mainframes de modo muito similar ao Software Livre.[3] Grupos de utilizadores como o do IBM 701, chamado SHARE, e o da Digital Equipment Corporation (DEC), chamado DECUS se formaram para facilitar a troca de software. Assim, no início, para aqueles que tinham acesso à tecnologia, o software era livre.
+1956: O governo dos EUA proíbe a AT&T de entrar no comércio de software (isso levou, posteriormente, o Bell Labs a distribuir livremente o seu Unix).
+1960: O software é distribuído com seu código-fonte e sem nenhuma restrição em grupos de software como SHARE (IBM) e DECUS (DEC).
+1969: O Request for Comments (RFC), que descreve a primeira Internet (depois chamada de ARPANET), é publicado; Ken Thompson e Dennis Ritchie desenvolvem uma versão simplificada do MULTICS para um PDP-7. Esse sistema foi batizado por Brian Kernighan de UNICS e depois como UNIX (um sistema operacional multitarefa).
+Surgimento do software restrito e berço do software livre
+Durante a década de 60 uma mudança começou a ocorrer: conforme os sistemas operacionais e os compiladores das linguagens de programação evoluíram, os custos manufatureiros de software aumentavam dramaticamente. Uma pequena, embora crescente indústria de software se formava, e competia com os softwares empacotados pelas manufaturas de hardware (o custo do software empacotado estava incluído nos custos do hardware), máquinas arrendadas exigiam suporte de software, mas não forneciam nenhum retorno pelo software, e alguns clientes capazes de satisfazer melhor suas próprias necessidades não queriam estes custos de software embutidos nos custos dos produtos de hardware.[4] No processo antitruste Estados Unidos con
