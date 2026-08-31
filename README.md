@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/Python-3.x-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Ollama-black?style=for-the-badge" alt="Ollama">
+  <img src="https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
   <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite">
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
 </p>
@@ -31,9 +32,9 @@ A proposta é transformar um modelo de linguagem local em uma personagem interat
 - armazenar conhecimento temporariamente;
 - interagir com o chat de uma live no YouTube;
 - receber eventos relacionados ao LivePix;
-- controlar uma interface 3D através do ChatVRM.
+- controlar um avatar 3D através do ChatVRM.
 
-O projeto funciona como uma camada de **orquestração entre modelos de IA, serviços externos e uma interface 3D**, centralizando tudo em uma API desenvolvida com FastAPI.
+O projeto funciona como uma camada de **orquestração entre modelos de IA, serviços externos, backend e uma interface 3D**, centralizando a lógica em uma API desenvolvida com FastAPI.
 
 ---
 
@@ -198,9 +199,22 @@ O módulo pode criar um túnel usando **Localtunnel** para permitir comunicaçã
 
 > ⚠️ Expor uma API local publicamente exige autenticação, validação de webhooks e outras medidas de segurança em ambientes reais.
 
-### 🎭 Interface 3D
+### 🎭 Interface 3D integrada
 
-A aplicação possui integração com **ChatVRM** e consegue iniciar/parar seu servidor de desenvolvimento.
+O **ChatVRM** faz parte do próprio repositório como uma aplicação integrada ao projeto Raiden.
+
+O front-end utiliza **Next.js/React** e fornece:
+
+- renderização do avatar VRM;
+- chat por texto;
+- reprodução de áudio com lip-sync;
+- troca de modelos `.vrm`;
+- reprodução de animações `.vrma`;
+- troca de fundos;
+- upload de modelos, animações e imagens;
+- integração direta com os endpoints da API Python.
+
+O backend controla o servidor do ChatVRM e consegue iniciá-lo através de:
 
 ```bash
 npm run dev
@@ -219,7 +233,8 @@ npm run dev
 | Memória             | SQLite                           |
 | Web                 | HTTPX, BeautifulSoup, DuckDuckGo |
 | YouTube             | Pytchat                          |
-| Front-end 3D        | ChatVRM, React, Node.js          |
+| Front-end 3D        | Next.js, React, ChatVRM          |
+| Avatar / Animações  | VRM, VRMA                        |
 | Streaming / Eventos | YouTube Live, LivePix            |
 | Túnel               | Localtunnel                      |
 | Sistema             | Linux / COSMIC                   |
@@ -233,10 +248,9 @@ Raiden_IA/
 │
 ├── api_raiden.py
 ├── Modelfile
+├── README.md
+├── requirements.txt
 ├── memoria_visual.txt
-│
-├── Artes/
-│   └── ...
 │
 ├── modulos/
 │   ├── frontend.py
@@ -245,21 +259,36 @@ Raiden_IA/
 │   ├── web_memoria.py
 │   └── youtube.py
 │
-├── chroma_db/
-│   └── ...
+├── ChatVRM/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── public/
+│   │   ├── *.vrm
+│   │   ├── *.vrma
+│   │   └── imagens/
+│   └── src/
+│       ├── components/
+│       ├── features/
+│       ├── hooks/
+│       └── pages/
 │
+├── Artes/
 └── .gitignore
 ```
 
-| Arquivo          | Função                              |
-| ---------------- | ----------------------------------- |
-| `api_raiden.py`  | Núcleo da aplicação e API principal |
-| `web_memoria.py` | Memória, cache e pesquisa web       |
-| `visao.py`       | Captura e análise da tela           |
-| `youtube.py`     | Leitura do chat do YouTube          |
-| `livepix.py`     | Integração com Localtunnel/LivePix  |
-| `frontend.py`    | Controle do servidor ChatVRM        |
-| `Modelfile`      | Configuração do modelo/personagem   |
+| Arquivo/Pasta       | Função                                      |
+| ------------------- | ------------------------------------------- |
+| `api_raiden.py`     | Núcleo da aplicação e API principal         |
+| `web_memoria.py`    | Memória, cache e pesquisa web               |
+| `visao.py`          | Captura e análise da tela                   |
+| `youtube.py`        | Leitura do chat do YouTube                  |
+| `livepix.py`        | Integração com Localtunnel/LivePix          |
+| `frontend.py`       | Controle do servidor do ChatVRM             |
+| `ChatVRM/`          | Interface 3D integrada da Raiden            |
+| `Modelfile`         | Configuração do modelo/personagem           |
+| `requirements.txt`  | Dependências Python do projeto              |
+
+> `node_modules/`, `.next/`, ambientes virtuais e bancos locais não fazem parte do código-fonte versionado.
 
 ---
 
@@ -288,6 +317,14 @@ Resposta:
 ## `GET /proximo_audio`
 
 Consulta se existe uma nova resposta disponível para o front-end.
+
+## `GET /api/arquivos`
+
+Lista os modelos `.vrm`, animações `.vrma` e imagens disponíveis no diretório público do ChatVRM.
+
+## `POST /api/upload`
+
+Recebe arquivos de avatar, animação ou imagem enviados pelo guarda-roupa da interface e salva no diretório público utilizado pela aplicação.
 
 ## `GET /api/painel/status`
 
@@ -321,22 +358,30 @@ git clone https://github.com/void222222/Raiden_IA.git
 cd Raiden_IA
 ```
 
-## 2. Crie o ambiente virtual
+## 2. Crie o ambiente virtual Python
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-## 3. Instale as dependências
+## 3. Instale as dependências Python
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 4. Configure o Ollama
+## 4. Instale as dependências do ChatVRM
 
-Instale o Ollama e disponibilize:
+```bash
+cd ChatVRM
+npm install
+cd ..
+```
+
+## 5. Configure o Ollama
+
+Disponibilize:
 
 ```text
 qwen2.5:3b
@@ -355,7 +400,7 @@ Verifique:
 curl http://localhost:11434/api/tags
 ```
 
-## 5. Instale o Localtunnel
+## 6. Instale o Localtunnel
 
 ```bash
 npm install -g localtunnel
@@ -368,36 +413,42 @@ npm install -g localtunnel
 Com o ambiente virtual ativado:
 
 ```bash
+python api_raiden.py
+```
+
+ou:
+
+```bash
 uvicorn api_raiden:app --host 0.0.0.0 --port 8000
 ```
 
-API:
+A API ficará disponível em:
 
 ```text
 http://localhost:8000
 ```
 
----
-
-# 🎭 ChatVRM
-
-O módulo espera encontrar o ChatVRM em:
-
-```text
-~/Documentos/ChatVRM
-```
-
-E inicia o front-end usando:
+O módulo de frontend consegue iniciar o ChatVRM integrado automaticamente com:
 
 ```bash
 npm run dev
 ```
 
-Porta esperada:
+na pasta `ChatVRM`.
+
+---
+
+# 🎭 ChatVRM
+
+O ChatVRM está incorporado ao próprio repositório em:
 
 ```text
-3000
+Raiden_IA/ChatVRM
 ```
+
+O código Python utiliza caminhos relativos ao projeto para localizar o front-end e seus arquivos públicos, evitando dependência do antigo caminho `~/Documentos/ChatVRM`.
+
+Isso permite mover o projeto inteiro para outro diretório sem precisar alterar caminhos absolutos no código.
 
 ---
 
@@ -440,7 +491,6 @@ Em uma evolução para produção, recomenda-se adicionar:
 
 ## Backend
 
-- [ ] `requirements.txt` / `pyproject.toml`
 - [ ] Melhorar tratamento de erros
 - [ ] Melhorar gerenciamento de processos
 - [ ] Adicionar testes automatizados
@@ -456,7 +506,7 @@ Em uma evolução para produção, recomenda-se adicionar:
 
 ## Interface
 
-- [ ] Melhor integração com ChatVRM
+- [ ] Melhorar integração com ChatVRM
 - [ ] Controle de expressões
 - [ ] Sincronização entre fala e animações
 - [ ] Painel de controle completo
