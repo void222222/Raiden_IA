@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+httpx
+edge-tts
+SpeechRecognition
+PyAudio
+pydantic
+beautifulsoup4
+pytchat
