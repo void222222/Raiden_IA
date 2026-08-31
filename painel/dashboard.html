@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Controle - RAIDEN</title>
+    <style>
+        /* ==========================================
+           CONFIGURAÇÕES DE ESTILO (CSS)
+           ========================================== */
+        body { 
+            background-color: #0d0d12; 
+            color: #e0e0e0; 
+            font-family: 'Segoe UI', Tahoma, sans-serif; 
+            margin: 0; 
+            padding: 40px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+
+        h1 { 
+            color: #9d4edd; 
+            text-shadow: 0 0 10px rgba(157, 78, 221, 0.5); 
+            margin-bottom: 5px; 
+        }
+
+        p { 
+            color: #888; 
+            margin-bottom: 30px; 
+        }
+
+        .card { 
+            background: #1a1a24; 
+            border: 1px solid #2d2d3f; 
+            border-radius: 12px; 
+            padding: 25px; 
+            width: 100%; 
+            max-width: 500px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); 
+        }
+
+        .card h2 { 
+            margin-top: 0; 
+            color: #fff; 
+            font-size: 1.2rem; 
+        }
+
+        input[type="text"], input[type="file"] { 
+            width: 100%; 
+            padding: 10px; 
+            margin: 10px 0; 
+            background: #0d0d12; 
+            border: 1px solid #3a3a52; 
+            color: #fff; 
+            border-radius: 6px; 
+            box-sizing: border-box; 
+        }
+
+        /* Corzinha do texto no input de arquivo */
+        input[type="file"] {
+            color: #888;
+            cursor: pointer;
+        }
+
+        button { 
+            background: linear-gradient(135deg, #7b2cbf, #9d4edd); 
+            color: white; 
+            border: none; 
+            padding: 12px 20px; 
+            width: 100%; 
+            border-radius: 6px; 
+            font-weight: bold; 
+            font-size: 1rem; 
+            cursor: pointer; 
+            transition: 0.3s; 
+        }
+
+        button:hover { 
+            box-shadow: 0 0 15px rgba(157, 78, 221, 0.6); 
+            transform: translateY(-2px); 
+        }
+
+        .status { 
+            font-size: 0.9rem; 
+            color: #00ff88; 
+            margin-top: 10px; 
+            display: none; 
+        }
+
+        .danger { 
+            background: linear-gradient(135deg, #dc3545, #c82333) !important; 
+        }
+
+        .description {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>⚡ RAIDEN SYSTEM</h1>
+    <p>Centro de Comando Central</p>
+
+    <!-- CARD: YOUTUBE -->
+    <div class="card">
+        <h2>🔴 Olheiro do YouTube</h2>
+        <input type="text" id="yt-link" placeholder="Cole o link da live aqui...">
+        <button id="btn-yt" onclick="toggleYoutube()">▶️ Injetar Olheiro</button>
+        <div id="yt-status" class="status">✅ Olheiro rodando na live!</div>
+    </div>
+
+    <!-- CARD: LIVEPIX -->
+    <div class="card">
+        <h2>💸 Túnel LivePix (Localtunnel)</h2>
+        <button id="btn-pix" onclick="toggleLivepix()">▶️ Abrir Túnel Seguro</button>
+        <div id="pix-status" class="status">🔗 Link: <span id="pix-link"></span></div>
+    </div>
+    
+    <!-- CARD: FRONT-END -->
+    <div class="card">
+        <h2>🎭 VTuber (ChatVRM)</h2>
+        <button id="btn-front" onclick="toggleFrontend()">▶️ Ligar a Raiden (3D)</button>
+        <div id="front-status" class="status">✅ Front-end rodando (Porta 3000)</div>
+    </div>
+
+    <!-- CARD: GUARDA-ROUPA (NOVO!) -->
+    <div class="card">
+        <h2>👗 Guarda-Roupa e Cenário</h2>
+        <div class="description">Envie fundos de tela (.png/.jpg) ou Avatares 3D (.vrm) direto para o servidor.</div>
+        <input type="file" id="arquivo-upload" accept=".png,.jpg,.jpeg,.vrm,.vrma">
+        <button id="btn-upload" onclick="fazerUpload()" style="margin-top: 5px;">📤 Enviar Arquivo</button>
+        <div id="upload-status" class="status"></div>
+    </div>
+
+    <!-- CARD: EMERGÊNCIA -->
+    <div class="card">
+        <h2>🛑 Controle de Emergência</h2>
+        <button class="danger" onclick="pararTudo()">Matar Todos os Processos</button>
+    </div>
+
+    <!-- ==========================================
+         LÓGICA JAVASCRIPT
+         ========================================== -->
+    <script>
+        // --- 1. RADAR DE STATUS CONSTANTE ---
+        async function carregarStatus() {
+            try {
+                const res = await fetch("/api/painel/status");
+                const status = await res.json();
+                
+                // Botão YouTube
+                const btnYt = document.getElementById('btn-yt');
+                const statYt = document.getElementById('yt-status');
+                if (status.youtube) {
+                    btnYt.innerText = "🛑 Desligar Olheiro";
+                    btnYt.className = "danger"; 
+                    statYt.style.display = 'block';
+                } else {
+                    btnYt.innerText = "▶️ Injetar Olheiro";
+                    btnYt.className = ""; 
+                    statYt.style.display = 'none';
+                }
+
+                // Botão Front-end
+                const btnFront = document.getElementById('btn-front');
+                const statFront = document.getElementById('front-status');
+                if (status.frontend) {
+                    btnFront.innerText = "🛑 Desligar a Raiden (3D)";
+                    btnFront.className = "danger";
+                    statFront.style.display = 'block';
+                } else {
+                    btnFront.innerText = "▶️ Ligar a Raiden (3D)";
+                    btnFront.className = "";
+                    statFront.style.display = 'none';
+                }
+
+                // Botão LivePix
+                const btnPix = document.getElementById('btn-pix');
+                const statPix = document.getElementById('pix-status');
+                if (status.livepix) {
+                    btnPix.innerText = "🛑 Fechar Túnel Seguro";
+                    btnPix.className = "danger";
+                    statPix.style.display = 'block';
+                } else {
+                    btnPix.innerText = "▶️ Abrir Túnel Seguro";
+                    btnPix.className = "";
+                    statPix.style.display = 'none';
+                }
+
+            } catch (e) {
+                console.warn("Radar aguardando a API iniciar...");
+            }
+        }
+
+        // Fica pingando o status a cada 2 segundos
+        setInterval(carregarStatus, 2000);
+        window.onload = carregarStatus;
+
+        // --- 2. CONTROLES DE BOTÕES ---
+        async function toggleYoutube() {
+            const link = document.getElementById('yt-link').value;
+            await fetch("/api/painel/youtube/toggle", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({link: link})
+            });
+            carregarStatus(); 
+        }
+
+        async function toggleLivepix() {
+            const res = await fetch("/api/painel/livepix/toggle", { method: "POST" });
+            const dados = await res.json();
+            
+            if (dados.status === "ligado") {
+                document.getElementById('pix-link').innerText = dados.url;
+                // Copia a URL automaticamente pro CTRL+C do usuário
+                navigator.clipboard.writeText(dados.url);
+                alert("URL copiada com sucesso! Cole lá no webhook do LivePix.");
+            }
+            carregarStatus();
+        }
+
+        async function toggleFrontend() {
+            await fetch("/api/painel/frontend/toggle", { method: "POST" });
+            carregarStatus(); 
+        }
+
+        async function pararTudo() {
+            await fetch("/api/painel/parar-tudo", { method: "POST" });
+            carregarStatus();
+        }
+
+        // --- 3. SISTEMA DE UPLOAD DE ARQUIVOS (NOVO) ---
+        async function fazerUpload() {
+            const inputArquivo = document.getElementById('arquivo-upload');
+            const divStatus = document.getElementById('upload-status');
+
+            if (inputArquivo.files.length === 0) {
+                alert("Pô mermão, escolhe um arquivo primeiro!");
+                return;
+            }
+
+            const arquivo = inputArquivo.files[0];
+            const formData = new FormData();
+            formData.append("file", arquivo);
+
+            try {
+                // UI de Carregamento
+                divStatus.style.display = 'block';
+                divStatus.style.color = '#fff';
+                divStatus.innerText = "⏳ Enviando o pacote pro servidor...";
+
+                const res = await fetch("/api/upload", {
+                    method: "POST",
+                    body: formData
+                });
+
+                if (res.ok) {
+                    divStatus.style.color = '#00ff88';
+                    divStatus.innerText = "✅ Arquivo salvo com sucesso na pasta public!";
+                    inputArquivo.value = ""; // Limpa a barra de arquivo
+                } else {
+                    divStatus.style.color = '#dc3545';
+                    divStatus.innerText = "❌ Deu ruim no servidor. Verifica a API.";
+                }
+            } catch (e) {
+                divStatus.style.color = '#dc3545';
+                divStatus.innerText = "❌ A API parece estar desligada.";
+            }
+            
+            // Esconde o aviso depois de 4 segundos
+            setTimeout(() => { divStatus.style.display = 'none'; }, 4000);
+        }
+    </script>
+
+</body>
+</html>

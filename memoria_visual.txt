@@ -1,0 +1,3 @@
+```vbnet
+=IF(TABELARIA_ATUAL="Desconhecido", "N/D", TABELA_INVALIDA)
+```
