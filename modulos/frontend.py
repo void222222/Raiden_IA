@@ -19,7 +19,10 @@ from typing import Optional
 logger = logging.getLogger("Frontend")
 
 # Caminho onde o projeto do ChatVRM está instalado no seu Linux
-CAMINHO_CHATVRM = os.path.expanduser("~/Documentos/ChatVRM")
+from pathlib import Path
+
+RAIZ_PROJETO = Path(__file__).resolve().parent.parent
+CAMINHO_CHATVRM = RAIZ_PROJETO / "ChatVRM"
 
 # Variável global para guardar o processo do Node.js/React
 processo_frontend: Optional[subprocess.Popen] = None

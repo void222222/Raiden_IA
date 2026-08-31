@@ -51,7 +51,10 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 MODELO_CONVERSA = "raiden_carioca"
 
 # Caminhos de Pastas
-PASTA_PUBLIC_CHATVRM = os.path.expanduser("~/Documentos/ChatVRM/public")
+from pathlib import Path
+
+RAIZ_PROJETO = Path(__file__).resolve().parent
+PASTA_PUBLIC_CHATVRM = RAIZ_PROJETO / "ChatVRM" / "public"
 
 # Variáveis Globais de Estado (Com trava de segurança para Threads)
 ultima_resposta: Optional[Dict[str, Any]] = None

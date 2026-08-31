@@ -1,0 +1,263 @@
+/* ==========================================================================
+   IMPORTAÇÕES DO TAILWIND (O Framework de CSS)
+   ========================================================================== */
+/* Essas três linhas puxam todo o poder do Tailwind para o projeto. 
+   Sem elas, aquelas classes tipo "bg-white", "text-primary" não funcionam. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   FUNDO DA PÁGINA (BODY)
+   ========================================================================== */
+body {
+  background: #0a0a12; /* Fundo principal super escuro (quase preto) */
+  /* Cria aqueles "holofotes" roxos brilhando no topo e no fundo da tela */
+  background-image: 
+    radial-gradient(ellipse at top, rgba(138, 43, 226, 0.15), transparent 60%),
+    radial-gradient(ellipse at bottom, rgba(176, 38, 255, 0.1), transparent 60%);
+  background-attachment: fixed; /* O fundo não se move quando você rola a página */
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #e0d6ff; /* Cor padrão do texto (um roxo bem clarinho/branco) */
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ==========================================================================
+   COMPONENTES CUSTOMIZADOS (Barras de volume, etc)
+   ========================================================================== */
+@layer components {
+  /* Tira o visual padrão feio do navegador para as barras de rolagem/volume */
+  .input-range {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: rgba(176, 38, 255, 0.3); /* Linha roxa transparente */
+    height: 2px;
+    width: 100%;
+    border-radius: 4px;
+  }
+  .input-range:focus,
+  .input-range:active {
+    outline: none; /* Tira aquela borda azul feia de quando clica */
+  }
+  
+  /* A "bolinha" que você arrasta na barra de volume */
+  .input-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    position: relative;
+    width: 24px;
+    height: 24px;
+    display: block;
+    border: 2px solid #b026ff;
+    background-color: #1a1a2e;
+    border-radius: 50%;
+    -webkit-border-radius: 50%;
+    box-shadow: 0 0 12px rgba(176, 38, 255, 0.5); /* Brilho neon na bolinha */
+  }
+}
+
+/* ==========================================================================
+   UTILITÁRIOS CUSTOMIZADOS
+   ========================================================================== */
+@layer utilities {
+  /* Classe mágica para esconder a barra de rolagem de alguma caixa, 
+     mas ainda permitir rolar com o mouse */
+  .scroll-hidden {
+    -ms-overflow-style: none; /* IE e Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .scroll-hidden::-webkit-scrollbar {
+    display: none; /* Chrome, Safari e Opera */
+  }
+}
+
+/* ==========================================================================
+   SCROLLBAR ROXA NEON (Para a página inteira)
+   ========================================================================== */
+::-webkit-scrollbar {
+  width: 4px; /* Barra bem fininha e elegante */
+}
+::-webkit-scrollbar-thumb {
+  background: #b026ff;
+  border-radius: 4px;
+  box-shadow: 0 0 6px #b026ff; /* Efeito de LED brilhando */
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 15, 25, 0.3); /* O "trilho" onde a barra corre */
+}
+
+/* ==========================================================================
+   EFEITO DE VIDRO ROXO (GLASSMORPHISM)
+   ========================================================================== */
+/* Como o React do ChatVRM joga muito código direto no HTML, usar o "style*=" e o "!important" 
+   é uma gambiarra genial para forçar o seu estilo por cima do estilo original. */
+
+/* Painel de chat (canto inferior esquerdo) */
+div[style*="linear-gradient"] {
+  background: rgba(15, 15, 25, 0.7) !important;
+  backdrop-filter: blur(16px) !important; /* O desfoque que dá o efeito de vidro */
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(176, 38, 255, 0.3) !important;
+  box-shadow: 0 0 30px rgba(138, 43, 226, 0.2), inset 0 0 30px rgba(138, 43, 226, 0.05) !important;
+}
+
+/* Cabeçalho do chat (Linha de separação embaixo do título) */
+div[style*="borderBottom"] {
+  border-bottom: 1px solid rgba(176, 38, 255, 0.2) !important;
+}
+
+/* Botão toggle chat (O círculo roxo flutuante) */
+button[title="Abrir Chat"] {
+  background: rgba(15, 15, 25, 0.7) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(176, 38, 255, 0.4) !important;
+  box-shadow: 0 0 15px rgba(138, 43, 226, 0.3) !important;
+  color: #b026ff !important;
+}
+/* Quando passa o mouse por cima do botão de abrir o chat */
+button[title="Abrir Chat"]:hover {
+  border-color: #b026ff !important;
+  box-shadow: 0 0 25px rgba(176, 38, 255, 0.5) !important;
+}
+
+/* ==========================================================================
+   CAIXA DE DIGITAÇÃO (Inputs e Textareas)
+   ========================================================================== */
+input[type="text"],
+textarea {
+  background: rgba(10, 10, 18, 0.7) !important;
+  border: 1px solid rgba(176, 38, 255, 0.3) !important;
+  border-radius: 10px !important;
+  color: #e0d6ff !important;
+  outline: none !important; /* Tira borda azul padrão do navegador */
+  transition: border-color 0.3s, box-shadow 0.3s !important;
+}
+
+/* Efeito de brilho quando você clica para digitar */
+input[type="text"]:focus,
+textarea:focus {
+  border-color: #b026ff !important;
+  box-shadow: 0 0 15px rgba(176, 38, 255, 0.3) !important;
+}
+
+/* Cor do texto de dica (placeholder) tipo "Digite aqui..." */
+input[type="text"]::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* ==========================================================================
+   BOTÕES GERAIS E ÍCONES
+   ========================================================================== */
+button {
+  transition: all 0.2s !important;
+}
+button:hover {
+  box-shadow: 0 0 10px rgba(176, 38, 255, 0.4) !important;
+}
+
+/* Botão de fechar (O famoso "✕" no canto superior direito) */
+button[style*="background: none"] {
+  color: #9b8ec4 !important;
+}
+button[style*="background: none"]:hover {
+  color: #b026ff !important;
+  text-shadow: 0 0 8px #b026ff !important;
+}
+
+/* ==========================================================================
+   AVISOS E ALERTAS NA TELA
+   ========================================================================== */
+/* Aviso de destravar áudio ("Clique na página para ativar o som") */
+div[style*="Clique na página"] {
+  background: rgba(138, 43, 226, 0.8) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(176, 38, 255, 0.4) !important;
+  box-shadow: 0 0 20px rgba(138, 43, 226, 0.4) !important;
+}
+
+/* Legenda da fala (O texto que aparece voando na frente da Raiden quando ela fala) */
+div[style*="textShadow: 2px 2px 4px black"] {
+  text-shadow: 0 0 10px rgba(176, 38, 255, 0.5), 2px 2px 4px black !important;
+}
+
+/* ==========================================================================
+   MODAL DE INTRODUÇÃO (A tela inicial do ChatVRM que pede as chaves)
+   ========================================================================== */
+.bg-black\/30 {
+  background: rgba(5, 5, 15, 0.7) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+/* A caixa principal branca original foi substituída por vidro escuro */
+.bg-white {
+  background: rgba(15, 15, 25, 0.85) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(176, 38, 255, 0.3) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 0 30px rgba(138, 43, 226, 0.2) !important;
+  color: #e0d6ff !important;
+}
+
+/* Caixinhas menores dentro da tela de configurações */
+.bg-surface3 {
+  background: rgba(10, 10, 18, 0.8) !important;
+  border: 1px solid rgba(176, 38, 255, 0.3) !important;
+  border-radius: 8px !important;
+  color: #e0d6ff !important;
+}
+.hover\\:bg-surface3-hover:hover {
+  background: rgba(176, 38, 255, 0.15) !important;
+}
+
+/* ==========================================================================
+   TEXTOS E LINKS
+   ========================================================================== */
+/* Títulos roxos com um pequeno brilho */
+.text-secondary {
+  color: #b026ff !important;
+  text-shadow: 0 0 8px rgba(176, 38, 255, 0.4) !important;
+}
+
+/* Texto branco azulado normal */
+.text-primary {
+  color: #e0d6ff !important;
+}
+
+/* Comportamento de links (<a>) em qualquer lugar do site */
+a {
+  color: #b026ff !important;
+  transition: text-shadow 0.2s !important;
+}
+a:hover {
+  text-shadow: 0 0 8px #b026ff !important;
+}
+
+/* ==========================================================================
+   BOTÕES REDONDOS (Como o botão "Entrar/Start")
+   ========================================================================== */
+.rounded-oval {
+  background: #8A2BE2 !important;
+  border-radius: 30px !important;
+  color: white !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 15px rgba(138, 43, 226, 0.4) !important;
+  transition: all 0.2s !important;
+}
+.rounded-oval:hover {
+  background: #b026ff !important;
+  box-shadow: 0 0 25px rgba(176, 38, 255, 0.6) !important;
+}
+
+/* ==========================================================================
+   MENU LATERAL (Configurações do avatar, voz e API originais)
+   ========================================================================== */
+/* Força o painel da direita a ficar com vidro em vez de fundo sólido */
+div[class*="sidebar"],
+aside {
+  background: rgba(15, 15, 25, 0.7) !important;
+  backdrop-filter: blur(16px) !important;
+  border-right: 1px solid rgba(176, 38, 255, 0.3) !important;
+}
