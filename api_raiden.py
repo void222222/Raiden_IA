@@ -2,7 +2,6 @@
 🎌 RAIDEN - API Principal 
 Fase 4: Core REST + Ouvido Físico + Visão + Centro de Comando
 """
-
 # ==========================================
 # 1. IMPORTS PADRÃO DO PYTHON
 # ==========================================
@@ -13,6 +12,7 @@ import os
 import re
 import sys
 import threading
+import queue
 from io import BytesIO
 from typing import Optional, Dict, Any
 from contextlib import contextmanager, asynccontextmanager
@@ -42,23 +42,27 @@ import modulos.livepix as pix_module
 # ==========================================
 # CONFIGURAÇÕES GERAIS E CONSTANTES
 # ==========================================
-# Configuração de Logs para o Terminal
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 logger = logging.getLogger("RaidenCore")
 
-# Configurações do Cérebro (Ollama)
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODELO_CONVERSA = "raiden_carioca"
 
-# Caminhos de Pastas
-from pathlib import Path
+# Mantém o modelo na memória da Placa de Vídeo por 5 minutos após a última fala.
+# Evita travamentos e delay quando a galera mandar perguntas seguidas.
+OLLAMA_KEEP_ALIVE = "5m" 
 
+MICROFONE_ATIVO = os.getenv("RAIDEN_MICROFONE_ATIVO", "0") == "1"
+
+from pathlib import Path
 RAIZ_PROJETO = Path(__file__).resolve().parent
 PASTA_PUBLIC_CHATVRM = RAIZ_PROJETO / "ChatVRM" / "public"
 
-# Variáveis Globais de Estado (Com trava de segurança para Threads)
-ultima_resposta: Optional[Dict[str, Any]] = None
-lock_resposta = threading.Lock()
+# ==========================================
+# VARIÁVEIS GLOBAIS DE ESTADO (FILAS)
+# ==========================================
+fila_perguntas = queue.Queue()
+fila_respostas = queue.Queue()
 
 # ==========================================
 # MODELOS DE DADOS (Pydantic)
@@ -75,10 +79,6 @@ class YouTubeRequest(BaseModel):
 # ==========================================
 @contextmanager
 def calar_linux():
-    """
-    Gambiarra suprema: Silencia os erros chatos de ALSA/Jack do microfone no Linux.
-    Ele desvia a saída de erro (stderr) para o limbo temporariamente.
-    """
     devnull = os.open(os.devnull, os.O_WRONLY)
     old_stderr = os.dup(2)
     sys.stderr.flush()
@@ -94,11 +94,6 @@ def calar_linux():
 # NÚCLEO DE INTELIGÊNCIA E VOZ
 # ==========================================
 async def pensar_ollama(prompt_usuario: str, respondendo_pesquisa: bool = False) -> str:
-    """
-    Envia a mensagem para o modelo Ollama e retorna o texto da Raiden.
-    Se 'respondendo_pesquisa' for True, ela não tentará pesquisar novamente.
-    """
-    # Define a personalidade baseada no contexto
     if respondendo_pesquisa:
         prompt_sistema = (
             "Você é a Raiden, uma VTuber Carioca Tsundere.\n"
@@ -113,12 +108,13 @@ async def pensar_ollama(prompt_usuario: str, respondendo_pesquisa: bool = False)
             "[PESQUISAR: termo resumido]\n"
             "NÃO escreva mais nada além da tag se precisar pesquisar."
         )
-
+    
     payload = {
         "model": MODELO_CONVERSA,
         "prompt": prompt_usuario,
         "system": prompt_sistema,
         "stream": False,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
         "options": {"num_predict": 150} 
     }
     
@@ -132,13 +128,8 @@ async def pensar_ollama(prompt_usuario: str, respondendo_pesquisa: bool = False)
         return "Deu ruim no meu cérebro, mermão. Vê se o Ollama tá ligado!"
 
 async def gerar_voz_base64(texto: str) -> Optional[str]:
-    """
-    Transforma o texto em áudio usando a voz do Edge TTS e converte para Base64 
-    para enviar direto para o ChatVRM.
-    """
     if not texto:
         return None
-        
     try:
         communicate = edge_tts.Communicate(texto, voice="pt-BR-FranciscaNeural", rate="+10%")
         audio_buffer = BytesIO()
@@ -151,24 +142,18 @@ async def gerar_voz_base64(texto: str) -> Optional[str]:
         return None
 
 async def processar_mensagem_completa(texto: str) -> str:
-    """
-    Cérebro orquestrador: Lida com Visão, Pesquisa Web ou Chat Normal.
-    """
     logger.info(f"🗣️ Input recebido: {texto}")
     texto_lower = texto.lower()
     
-    # 1. Checa se o usuário pediu para ela "ver a tela"
     gatilhos_visao = ["olha", "vê", "ve", "que tem", "mostra"]
     if "tela" in texto_lower and any(palavra in texto_lower for palavra in gatilhos_visao):
         logger.info("👁️ Ativando o olho (Tirando print no COSMIC)...")
         descricao_tela = await ver_a_tela()
         prompt_visao = f"O usuário pediu para você olhar a tela dele. Você viu isso: '{descricao_tela}'. Descreva isso para ele com a sua personalidade carioca."
         return await pensar_ollama(prompt_visao, respondendo_pesquisa=True)
-
-    # 2. Fluxo Normal: Manda para a IA
+        
     resposta_bruta = await pensar_ollama(texto, respondendo_pesquisa=False)
     
-    # 3. Verifica se a IA pediu para pesquisar na Web
     match = re.search(r'\[PESQUISAR:\s*(.*?)\]', resposta_bruta, re.IGNORECASE)
     if match:
         query = match.group(1).strip()
@@ -187,78 +172,61 @@ async def processar_mensagem_completa(texto: str) -> str:
         except Exception as e:
             logger.error(f"Erro ao tentar ler a tag e pesquisar: {e}")
             return "Foi mal, minha conexão com a internet caiu aqui."
-
-    # 4. Retorna a resposta normal se não for visão nem pesquisa
+            
     return resposta_bruta
 
-# ==========================================
-# TRATAMENTO DE ÁUDIO E EVENTOS (Inputs)
-# ==========================================
-def callback_youtube(comando: str):
-    """
-    Função chamada quando o módulo do YouTube detecta uma nova mensagem no chat.
-    Roda em uma thread separada, por isso cria seu próprio loop assíncrono.
-    """
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+def worker_cerebro():
+    """Roda em background processando uma mensagem por vez da fila."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    while True:
+        comando = fila_perguntas.get() # Fica aguardando até ter mensagem
+        logger.info(f"🧠 Processando pergunta da fila: {comando}")
         
-        resposta_texto = loop.run_until_complete(processar_mensagem_completa(comando))
-        audio_b64 = loop.run_until_complete(gerar_voz_base64(resposta_texto))
-        loop.close()
-        
-        global ultima_resposta
-        with lock_resposta:
-            ultima_resposta = {
+        try:
+            resposta_texto = loop.run_until_complete(processar_mensagem_completa(comando))
+            audio_b64 = loop.run_until_complete(gerar_voz_base64(resposta_texto))
+            
+            fila_respostas.put({
                 "texto": resposta_texto,
                 "audio_base64": audio_b64,
                 "expressao": "neutral"
-            }
-    except Exception as e:
-        logger.error(f"Erro ao processar mensagem do YouTube: {e}")
+            })
+        except Exception as e:
+            logger.error(f"Erro no processamento da fila: {e}")
+        finally:
+            fila_perguntas.task_done()
+
+# ==========================================
+# TRATAMENTO DE EVENTOS (Inputs)
+# ==========================================
+def callback_youtube(comando: str):
+    """Apenas joga o comando recebido do YouTube na fila."""
+    fila_perguntas.put(comando)
 
 def escutar_microfone():
-    """
-    Fica ouvindo o microfone do PC o tempo todo em uma Thread separada.
-    Se ouvir 'Raiden', processa o comando.
-    """
+    """Joga os comandos de voz na fila."""
     r = sr.Recognizer()
     r.energy_threshold = 300
     r.dynamic_energy_threshold = True
     r.pause_threshold = 0.8
-
     with calar_linux():
         mic = sr.Microphone()
-
     with mic as source:
         r.adjust_for_ambient_noise(source, duration=1)
         logger.info("🎤 Ouvido físico ativado! Diga 'Raiden, [sua mensagem]'.")
-        
         while True:
             try:
                 audio = r.listen(source, phrase_time_limit=8)
                 texto = r.recognize_google(audio, language="pt-BR").lower()
-                
                 if "raiden" in texto:
                     comando = texto.replace("raiden", "").strip()
                     if comando:
                         logger.info(f"🎙️ Microfone captou: {comando}")
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        
-                        resposta_texto = loop.run_until_complete(processar_mensagem_completa(comando))
-                        audio_b64 = loop.run_until_complete(gerar_voz_base64(resposta_texto))
-                        loop.close()
-                        
-                        global ultima_resposta
-                        with lock_resposta:
-                            ultima_resposta = {
-                                "texto": resposta_texto,
-                                "audio_base64": audio_b64,
-                                "expressao": "neutral"
-                            }
+                        fila_perguntas.put(comando)
             except sr.UnknownValueError:
-                pass  # Ignora quando não entende o que foi dito
+                pass
             except Exception as e:
                 logger.debug(f"Aviso no microfone: {e}")
 
@@ -267,56 +235,50 @@ def escutar_microfone():
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Eventos que rodam quando a API liga e desliga."""
     iniciar_banco()
-    threading.Thread(target=escutar_microfone, daemon=True).start()
     
-    # Prepara a pasta de assets se ela não existir
+    # Inicia a fila de processamento da Raiden
+    threading.Thread(target=worker_cerebro, daemon=True, name="TrabalhadorCerebro").start()
+    
+    if MICROFONE_ATIVO:
+        threading.Thread(target=escutar_microfone, daemon=True).start()
+        logger.info("🎤 Ouvido físico ativado por RAIDEN_MICROFONE_ATIVO=1.")
+    else:
+        logger.info("🎤 Ouvido físico desativado.")
+        
     if not os.path.exists(PASTA_PUBLIC_CHATVRM):
         os.makedirs(PASTA_PUBLIC_CHATVRM)
-        
     yield
-    # Aqui entraria código para desligar coisas de forma segura, se necessário.
 
 app = FastAPI(title="Raiden Core API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Servindo arquivos estáticos (Fundos, Modelos VRM)
 app.mount("/midia", StaticFiles(directory=PASTA_PUBLIC_CHATVRM), name="midia")
 
 @app.post("/chat")
 async def chat_endpoint(req: MensagemRequest):
-    """Recebe mensagens em texto (via Painel ou ChatVRM) e processa."""
-    global ultima_resposta
+    """Recebe mensagens manuais (Painel/VRM) e joga na fila."""
     texto = req.texto or req.text
     if not texto: 
         raise HTTPException(status_code=400, detail="Texto vazio!")
-        
-    resposta_texto = await processar_mensagem_completa(texto)
-    audio_b64 = await gerar_voz_base64(resposta_texto)
     
-    resultado = {"texto": resposta_texto, "audio_base64": audio_b64, "expressao": "neutral"}
-    with lock_resposta:
-        ultima_resposta = resultado
-    return resultado
+    fila_perguntas.put(texto)
+    return {"status": "Adicionado à fila de processamento"}
 
 @app.get("/proximo_audio")
 async def proximo_audio():
     """Endpoint que o ChatVRM consome constantemente para ver se tem áudio novo."""
-    global ultima_resposta
-    with lock_resposta:
-        if ultima_resposta:
-            resp = ultima_resposta
-            ultima_resposta = None
-            return resp
-    return {"texto": None, "audio_base64": None}
+    try:
+        resp = fila_respostas.get_nowait()
+        return resp
+    except queue.Empty:
+        return {"texto": None, "audio_base64": None}
 
 # ==========================================
 # 🎛️ ROTAS DO PAINEL DE COMANDO
 # ==========================================
 @app.get("/api/painel/status")
 async def painel_status():
-    """Retorna se os módulos estão ligados ou desligados."""
     return {
         "youtube": yt_module.olheiro_ativo,
         "frontend": front_module.processo_frontend is not None,
@@ -325,7 +287,6 @@ async def painel_status():
 
 @app.post("/api/painel/youtube/toggle")
 async def toggle_youtube(req: YouTubeRequest = None):
-    """Liga ou desliga a leitura do chat do YouTube."""
     if yt_module.olheiro_ativo:
         yt_module.parar_olheiro()
         return {"status": "desligado"}
@@ -339,7 +300,6 @@ async def toggle_youtube(req: YouTubeRequest = None):
 
 @app.post("/api/painel/frontend/toggle")
 async def toggle_frontend():
-    """Liga ou desliga a interface 3D da Raiden (ChatVRM)."""
     if front_module.processo_frontend is not None:
         front_module.parar_chatvrm()
         return {"status": "desligado"}
@@ -351,7 +311,6 @@ async def toggle_frontend():
 
 @app.post("/api/painel/livepix/toggle")
 async def toggle_livepix():
-    """Liga ou desliga a escuta de doações (LivePix)."""
     if pix_module.processo_tunel is not None:
         pix_module.parar_tunel()
         return {"status": "desligado"}
@@ -363,7 +322,6 @@ async def toggle_livepix():
 
 @app.post("/api/painel/parar-tudo")
 async def painel_parar():
-    """Botão de pânico: Desliga todos os processos de uma vez."""
     yt_module.parar_olheiro()
     front_module.parar_chatvrm()
     pix_module.parar_tunel()
@@ -372,7 +330,6 @@ async def painel_parar():
 
 @app.get("/painel")
 async def abrir_painel():
-    """Entrega o HTML do painel de controle."""
     return FileResponse("painel/dashboard.html")
 
 # ==========================================
@@ -380,7 +337,6 @@ async def abrir_painel():
 # ==========================================
 @app.get("/api/arquivos")
 async def listar_arquivos():
-    """Lista todos os arquivos VRM, VRMA e Imagens da pasta public."""
     modelos, animacoes, fundos = [], [], []
     for arquivo in os.listdir(PASTA_PUBLIC_CHATVRM):
         if arquivo.endswith(".vrm"):
@@ -393,7 +349,6 @@ async def listar_arquivos():
 
 @app.post("/api/upload")
 async def upload_arquivo(file: UploadFile = File(...)):
-    """Salva um novo fundo ou modelo VRM enviado pelo painel."""
     caminho_salvar = os.path.join(PASTA_PUBLIC_CHATVRM, file.filename)
     try:
         with open(caminho_salvar, "wb") as buffer:
