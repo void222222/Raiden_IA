@@ -1,5 +1,4 @@
-
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface Message {
   role: "user" | "assistant";
@@ -19,23 +18,134 @@ export function useChat(
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Adiciona uma mensagem manualmente ao histórico.
+  const socketRef = useRef<WebSocket | null>(null);
+
+  // Converte http:// para ws:// e https:// para wss://
+  const wsUrl = apiUrl
+    .replace(/^http:/, "ws:")
+    .replace(/^https:/, "wss:")
+    .replace(/\/$/, "");
+
+  // ==========================================
+  // 🔌 CONEXÃO WEBSOCKET
+  // ==========================================
+
+  useEffect(() => {
+    const socket = new WebSocket(`${wsUrl}/ws`);
+
+    socketRef.current = socket;
+
+    socket.onopen = () => {
+      console.log("🔌 WebSocket da Raiden conectado.");
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const data: ChatResponse = JSON.parse(event.data);
+
+        const resposta =
+          data.texto?.trim() ||
+          "Desculpe, não consegui responder.";
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: resposta,
+          },
+        ]);
+
+        if (data.audio_base64 && playWithLipSync) {
+          playWithLipSync(data.audio_base64);
+        }
+      } catch (error) {
+        console.error(
+          "❌ Erro ao interpretar resposta do WebSocket:",
+          error
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error(
+        "❌ Erro no WebSocket da Raiden:",
+        error
+      );
+
+      setIsLoading(false);
+    };
+
+    socket.onclose = () => {
+      console.log(
+        "🔌 WebSocket da Raiden desconectado."
+      );
+
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+
+      setIsLoading(false);
+    };
+
+    return () => {
+      socket.close();
+      socketRef.current = null;
+    };
+  }, [wsUrl, playWithLipSync]);
+
+  // ==========================================
+  // 💬 ADICIONAR MENSAGEM MANUALMENTE
+  // ==========================================
+
   const addMessage = useCallback(
     (role: "user" | "assistant", content: string) => {
-      setMessages((prev) => [...prev, { role, content }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role,
+          content,
+        },
+      ]);
     },
     []
   );
 
-  // Envia uma mensagem para a Raiden.
+  // ==========================================
+  // 📤 ENVIAR MENSAGEM
+  // ==========================================
+
   const sendMessage = useCallback(
     async (text: string) => {
       const texto = text.trim();
 
-      // Ignora mensagens vazias.
       if (!texto) return;
 
-      // Coloca a mensagem do usuário imediatamente no chat.
+      const socket = socketRef.current;
+
+      // Verifica se o WebSocket está conectado.
+      if (
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "Não consegui conectar com a Raiden.",
+          },
+        ]);
+
+        console.error(
+          "❌ WebSocket não está conectado."
+        );
+
+        return;
+      }
+
+      // Mostra a mensagem do usuário imediatamente.
       setMessages((prev) => [
         ...prev,
         {
@@ -47,75 +157,32 @@ export function useChat(
       setIsLoading(true);
 
       try {
-        const res = await fetch(`${apiUrl}/chat`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            texto,
-          }),
-        });
-
-        // Trata erros HTTP da API.
-        if (!res.ok) {
-          let detalhe = `Erro HTTP ${res.status}`;
-
-          try {
-            const erro = await res.json();
-
-            if (erro.detail) {
-              detalhe = erro.detail;
-            }
-          } catch {
-            // Mantém a mensagem padrão caso a resposta não seja JSON.
-          }
-
-          throw new Error(detalhe);
-        }
-
-        const data: ChatResponse = await res.json();
-
-        const resposta =
-          data.texto?.trim() ||
-          "Desculpe, não consegui responder.";
-
-        // Mostra a resposta da Raiden.
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: resposta,
-          },
-        ]);
-
-        // Toca o áudio e ativa o LipSync.
-        if (data.audio_base64 && playWithLipSync) {
-          playWithLipSync(data.audio_base64);
-        }
+        socket.send(texto);
       } catch (error) {
-        console.error("Erro ao enviar mensagem:", error);
+        console.error(
+          "❌ Erro ao enviar mensagem pelo WebSocket:",
+          error
+        );
 
-        const mensagemErro =
-          error instanceof Error
-            ? error.message
-            : "Erro desconhecido ao comunicar com a Raiden.";
+        setIsLoading(false);
 
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: `Erro ao comunicar com a Raiden: ${mensagemErro}`,
+            content:
+              "Erro ao enviar mensagem para a Raiden.",
           },
         ]);
-      } finally {
-        setIsLoading(false);
       }
     },
-    [apiUrl, playWithLipSync]
+    []
   );
 
-  // Limpa o histórico visual do chat.
+  // ==========================================
+  // 🧹 LIMPAR HISTÓRICO VISUAL
+  // ==========================================
+
   const clearMessages = useCallback(() => {
     setMessages([]);
   }, []);

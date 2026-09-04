@@ -27,7 +27,14 @@ import uvicorn
 import edge_tts
 import speech_recognition as sr
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    UploadFile,
+    File,
+    WebSocket,
+    WebSocketDisconnect
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -332,10 +339,10 @@ async def processar_mensagem_completa(
     # ------------------------------------------
 
     match = re.search(
-        r"\[PESQUISAR:\s*(.*?)\]",
-        resposta_bruta,
-        re.IGNORECASE
-    )
+    r"\[PESQUISAR:\s*(.*?)\]",
+    resposta_bruta,
+    re.IGNORECASE
+        )
 
     if match:
 
@@ -786,6 +793,106 @@ async def chat_endpoint(
             )
         )
 
+
+# ==========================================
+# 🔌 WEBSOCKET
+# ==========================================
+
+@app.websocket("/ws")
+async def websocket_chat(websocket: WebSocket):
+
+    await websocket.accept()
+
+    logger.info(
+        "🔌 WebSocket conectado."
+    )
+
+    try:
+
+        while True:
+
+            texto = (
+                await websocket.receive_text()
+            ).strip()
+
+            if not texto:
+
+                await websocket.send_json({
+                    "texto": "Manda alguma coisa aí, mermão.",
+                    "audio_base64": None,
+                    "expressao": "neutral"
+                })
+
+                continue
+
+            logger.info(
+                f"🔌 WebSocket recebeu: {texto}"
+            )
+
+            # Cria uma fila exclusiva
+            # para essa mensagem.
+            fila_retorno = queue.Queue(
+                maxsize=1
+            )
+
+            # Envia para o mesmo cérebro
+            # que já usamos no /chat.
+            fila_perguntas.put(
+                (
+                    texto,
+                    fila_retorno
+                )
+            )
+
+            try:
+
+                resposta = await asyncio.to_thread(
+                    fila_retorno.get,
+                    True,
+                    60
+                )
+
+            except queue.Empty:
+
+                await websocket.send_json({
+                    "texto": (
+                        "A Raiden demorou demais "
+                        "pra responder, mermão."
+                    ),
+                    "audio_base64": None,
+                    "expressao": "neutral"
+                })
+
+                continue
+
+            # Envia texto + áudio + expressão
+            # para o frontend.
+            await websocket.send_json(
+                resposta
+            )
+
+            logger.info(
+                "🔌 Resposta enviada pelo WebSocket."
+            )
+
+    except WebSocketDisconnect:
+
+        logger.info(
+            "🔌 WebSocket desconectado."
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ Erro no WebSocket: {e}"
+        )
+
+        try:
+            await websocket.close(
+                code=1011
+            )
+        except Exception:
+            pass
 
 # ==========================================
 # 🔊 FILA DE ÁUDIO

@@ -54,13 +54,13 @@ export default function Home() {
   // CONEXÃO COM A API PYTHON
   // ==========================================================================
 
-  const [apiUrl, setApiUrl] = useState("http://localhost:8000");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setApiUrl(`http://${window.location.hostname}:8000`);
+  const [apiUrl] = useState(() => {
+    if (typeof window === "undefined") {
+      return "http://localhost:8000";
     }
-  }, []);
+
+    return `http://${window.location.hostname}:8000`;
+  });
 
   // ==========================================================================
   // EFEITO DO MOUSE
@@ -934,4 +934,3 @@ export default function Home() {
     </div>
   );
 }
-
