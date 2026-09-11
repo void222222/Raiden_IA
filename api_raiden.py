@@ -1059,10 +1059,14 @@ async def websocket_minecraft(
                 "desconhecido"
             )
 
-            logger.info(
-                f"⛏ Minecraft → Raiden | "
-                f"tipo={tipo} | dados={mensagem}"
-            )
+            # O estado é recebido continuamente.
+            # Não registrar no terminal para evitar spam.
+            if tipo != "estado":
+
+                logger.info(
+                    f"⛏ Minecraft → Raiden | "
+                    f"tipo={tipo} | dados={mensagem}"
+                )
 
             # --------------------------------------
             # PING
@@ -1082,14 +1086,10 @@ async def websocket_minecraft(
 
             if tipo == "estado":
 
-                minecraft_module.minecraft_bridge.atualizar_estado(mensagem)
-                
-                estado = minecraft_module.minecraft_bridge.obter_estado()
+                minecraft_module.minecraft_bridge.atualizar_estado(
+                    mensagem
+                )
 
-                logger.info(
-                    f"🧠 Estado consultado pela Raiden: {estado}"
-                )                    
-                
                 await minecraft_module.minecraft_bridge.enviar({
                     "tipo": "ack",
                     "origem": "raiden",
