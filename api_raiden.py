@@ -58,7 +58,7 @@ from modulos.visao import ver_a_tela
 import modulos.youtube as yt_module
 import modulos.frontend as front_module
 import modulos.livepix as pix_module
-
+import modulos.minecraft as minecraft_module
 
 # ==========================================
 # CONFIGURAÇÕES GERAIS
@@ -989,6 +989,145 @@ async def websocket_chat(websocket: WebSocket):
             pass
 
 
+
+# ==========================================
+# ⛏ WEBSOCKET DO MINECRAFT
+# ==========================================
+
+@app.websocket("/ws/minecraft")
+async def websocket_minecraft(
+    websocket: WebSocket
+):
+    """
+    WebSocket exclusivo para o módulo Minecraft.
+
+    Não interfere no WebSocket normal da Raiden.
+
+    Fluxo:
+
+        Minecraft
+            ↕
+        /ws/minecraft
+            ↕
+        MinecraftBridge
+            ↕
+          Raiden
+    """
+
+    await websocket.accept()
+
+    await minecraft_module.minecraft_bridge.conectar(
+        websocket
+    )
+
+    logger.info(
+        "⛏ Conexão Minecraft estabelecida."
+    )
+
+    # Confirmação inicial para o cliente.
+    await minecraft_module.minecraft_bridge.enviar({
+        "tipo": "conexao",
+        "status": "ok",
+        "mensagem": "Minecraft conectado à Raiden."
+    })
+
+    try:
+
+        while True:
+
+            mensagem = await websocket.receive_json()
+
+            if not isinstance(mensagem, dict):
+
+                logger.warning(
+                    "⚠️ Minecraft enviou uma mensagem "
+                    "que não é um objeto JSON."
+                )
+
+                await minecraft_module.minecraft_bridge.enviar({
+                    "tipo": "erro",
+                    "mensagem": (
+                        "A mensagem precisa ser um "
+                        "objeto JSON."
+                    )
+                })
+
+                continue
+
+            tipo = mensagem.get(
+                "tipo",
+                "desconhecido"
+            )
+
+            logger.info(
+                f"⛏ Minecraft → Raiden | "
+                f"tipo={tipo} | dados={mensagem}"
+            )
+
+            # --------------------------------------
+            # PING
+            # --------------------------------------
+
+            if tipo == "ping":
+
+                await minecraft_module.minecraft_bridge.enviar({
+                    "tipo": "pong"
+                })
+
+                continue
+
+            # --------------------------------------
+            # ESTADO DO MINECRAFT
+            # --------------------------------------
+
+            if tipo == "estado":
+
+                minecraft_module.minecraft_bridge.atualizar_estado(mensagem)
+                
+                estado = minecraft_module.minecraft_bridge.obter_estado()
+
+                logger.info(
+                    f"🧠 Estado consultado pela Raiden: {estado}"
+                )                    
+                
+                await minecraft_module.minecraft_bridge.enviar({
+                    "tipo": "ack",
+                    "origem": "raiden",
+                    "evento": "estado_recebido"
+                })
+
+                continue
+
+            # --------------------------------------
+            # EVENTO GENÉRICO
+            # --------------------------------------
+
+            await minecraft_module.minecraft_bridge.enviar({
+                "tipo": "ack",
+                "origem": "raiden",
+                "evento": "mensagem_recebida",
+                "tipo_recebido": tipo
+            })
+
+    except WebSocketDisconnect:
+
+        logger.info(
+            "⛏ Minecraft encerrou a conexão."
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ Erro no WebSocket Minecraft: {e}"
+        )
+
+    finally:
+
+        await minecraft_module.minecraft_bridge.desconectar()
+
+        logger.info(
+            "⛏ Conexão Minecraft finalizada."
+        )
 # ==========================================
 # 🔊 FILA DE ÁUDIO (PÚBLICO)
 # ==========================================
