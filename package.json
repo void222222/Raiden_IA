@@ -1,5 +1,7 @@
 {
   "dependencies": {
-    "@pixiv/three-vrm-animation": "^3.5.5"
+    "@pixiv/three-vrm-animation": "^3.5.5",
+    "mineflayer": "^4.39.0",
+    "ws": "^8.21.3"
   }
 }
