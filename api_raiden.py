@@ -1,6 +1,7 @@
 """
 🎌 RAIDEN - API Principal
 Fase 4: Core REST + Ouvido Físico + Visão + Centro de Comando
+Revisão Final: Segurança + Estabilidade + Memória de Curto Prazo + Memória Pessoal
 """
 
 # ==========================================
@@ -14,6 +15,7 @@ import re
 import sys
 import threading
 import queue
+from collections import deque
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -43,7 +45,14 @@ from pydantic import BaseModel
 # ==========================================
 # 3. MÓDULOS DA RAIDEN
 # ==========================================
-from modulos.web_memoria import iniciar_banco, consultar_conhecimento
+from modulos.web_memoria import (
+    iniciar_banco,
+    consultar_conhecimento,
+    lembrar_memoria_pessoal,
+    aprender_memoria_pessoal,
+    esquecer_memoria_pessoal,
+    listar_memorias_pessoais,
+)
 from modulos.visao import ver_a_tela
 
 import modulos.youtube as yt_module
@@ -71,6 +80,19 @@ MICROFONE_ATIVO = (
     os.getenv("RAIDEN_MICROFONE_ATIVO", "0") == "1"
 )
 
+# CORS - Configurável via variável de ambiente
+# Padrão: localhost para desenvolvimento
+CORS_ORIGINS = os.getenv(
+    "RAIDEN_CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:8080"
+).split(",")
+
+# Tamanho máximo de upload (10MB)
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+# Tamanho do chunk para leitura de upload (1MB)
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 RAIZ_PROJETO = Path(__file__).resolve().parent
 
 PASTA_PUBLIC_CHATVRM = (
@@ -85,21 +107,16 @@ PASTA_PAINEL = (
 # ==========================================
 # FILAS
 # ==========================================
-#
-# fila_perguntas:
-#   recebe mensagens para o cérebro processar.
-#
-# fila_respostas:
-#   recebe respostas vindas do YouTube/microfone.
-#
-# Mensagens manuais do /chat recebem uma fila
-# própria temporária para que o endpoint possa
-# esperar pela resposta correta.
-#
-# ==========================================
-
 fila_perguntas = queue.Queue()
 fila_respostas = queue.Queue()
+
+
+# ==========================================
+# 🧠 CONTEXTO DE CURTO PRAZO
+# ==========================================
+
+historico_conversa = deque(maxlen=10)
+historico_lock = threading.Lock()
 
 
 # ==========================================
@@ -115,6 +132,17 @@ class YouTubeRequest(BaseModel):
     link: Optional[str] = None
 
 
+class MemoriaRequest(BaseModel):
+    termo: str
+    conteudo: str
+    categoria: str = "geral"
+
+
+class EsquecerMemoriaRequest(BaseModel):
+    termo: str
+    categoria: Optional[str] = None
+
+
 # ==========================================
 # UTILITÁRIO
 # ==========================================
@@ -123,9 +151,7 @@ class YouTubeRequest(BaseModel):
 def calar_linux():
     """
     Silencia temporariamente o stderr.
-
-    Usado principalmente na inicialização do
-    microfone para evitar mensagens indesejadas
+    Usado para evitar mensagens indesejadas
     de bibliotecas do sistema.
     """
 
@@ -157,43 +183,125 @@ def calar_linux():
 
 
 # ==========================================
+# 🧠 MEMÓRIA DE CURTO PRAZO
+# ==========================================
+
+def adicionar_ao_historico(
+    usuario: str,
+    raiden: str
+):
+    """
+    Salva uma interação recente da conversa.
+    Thread-safe.
+    """
+
+    with historico_lock:
+        historico_conversa.append({
+            "usuario": usuario,
+            "raiden": raiden
+        })
+
+
+def obter_contexto_conversa() -> str:
+    """
+    Monta o histórico recente em texto
+    para o Ollama entender o contexto.
+    Thread-safe.
+    """
+
+    with historico_lock:
+        historico = list(historico_conversa)
+
+    if not historico:
+        return "Não existe conversa anterior relevante."
+
+    linhas = ["CONVERSA RECENTE:"]
+
+    for item in historico:
+        linhas.append(
+            f"Lucas: {item['usuario']}"
+        )
+        linhas.append(
+            f"Raiden: {item['raiden']}"
+        )
+
+    return "\n".join(linhas)
+
+
+def limpar_historico():
+    """
+    Limpa todo o histórico de conversa.
+    Thread-safe.
+    """
+
+    with historico_lock:
+        historico_conversa.clear()
+
+    logger.info("🧹 Histórico de conversa limpo.")
+
+
+def obter_memoria_pessoal(termo: str) -> str:
+    """
+    Busca informações permanentes relevantes sobre Lucas/projeto.
+
+    A memória pessoal é diferente do histórico:
+    - histórico = conversa recente
+    - memória pessoal = informações que devem permanecer
+    """
+    try:
+        memoria = lembrar_memoria_pessoal(termo)
+
+        if memoria:
+            return memoria
+
+    except Exception as e:
+        logger.error(
+            f"❌ Erro ao consultar memória pessoal: {e}"
+        )
+
+    return ""
+
+
+# ==========================================
 # 🧠 CÉREBRO — OLLAMA
 # ==========================================
 
 async def pensar_ollama(
     prompt_usuario: str,
-    respondendo_pesquisa: bool = False
+    memoria_pessoal: str = ""
 ) -> str:
+    """
+    Envia a mensagem ao Ollama com contexto.
+    O Modelfile controla a personalidade.
+    O Python controla contexto/orquestração.
+    """
 
-    if respondendo_pesquisa:
+    contexto = obter_contexto_conversa()
 
-        prompt_sistema = (
-            "Você é a Raiden, uma VTuber Carioca Tsundere.\n"
-            "Responda em no MÁXIMO 2 frases curtas. "
-            "Seja direta. Use gírias do Rio "
-            "(Mermão, Papo reto, Coé).\n"
-            "Apenas leia a informação recebida e "
-            "explique para o usuário com a sua personalidade."
+    bloco_memoria = ""
+
+    if memoria_pessoal:
+        bloco_memoria = (
+            "\n\nMEMÓRIA PESSOAL RELEVANTE:\n"
+            f"{memoria_pessoal}\n"
+            "\nUse essa memória somente se ela for relevante "
+            "para a mensagem atual. Não invente informações "
+            "a partir dela.\n"
         )
 
-    else:
-
-        prompt_sistema = (
-            "Você é a Raiden, uma VTuber Carioca Tsundere.\n"
-            "Regra 1: Responda em no MÁXIMO 2 frases curtas. "
-            "Seja direta. Use gírias do Rio.\n"
-            "Regra 2: Se pedirem curiosidades, tutoriais "
-            "ou coisas que você NÃO SABE, responda "
-            "APENAS com a tag:\n"
-            "[PESQUISAR: termo resumido]\n"
-            "NÃO escreva mais nada além da tag "
-            "se precisar pesquisar."
-        )
+    prompt_final = (
+        f"{contexto}\n"
+        f"{bloco_memoria}\n"
+        "MENSAGEM ATUAL DO LUCAS:\n"
+        f"{prompt_usuario}\n\n"
+        "Responda à mensagem atual considerando "
+        "a conversa recente e a memória pessoal "
+        "quando forem relevantes."
+    )
 
     payload = {
         "model": MODELO_CONVERSA,
-        "prompt": prompt_usuario,
-        "system": prompt_sistema,
+        "prompt": prompt_final,
         "stream": False,
         "keep_alive": OLLAMA_KEEP_ALIVE,
         "options": {
@@ -218,12 +326,22 @@ async def pensar_ollama(
                 ""
             ).strip()
 
-    except Exception as e:
-
-        logger.error(
-            f"Erro ao conectar com o cérebro (Ollama): {e}"
+    except httpx.TimeoutException:
+        logger.error("⏱️ Timeout ao conectar com Ollama")
+        return (
+            "Demorei demais pra pensar, mermão. "
+            "Tenta de novo aí."
         )
 
+    except httpx.HTTPError as e:
+        logger.error(f"🌐 Erro HTTP com Ollama: {e}")
+        return (
+            "Deu ruim na comunicação com meu cérebro. "
+            "Vê se o Ollama tá ligado!"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Erro inesperado no Ollama: {e}")
         return (
             "Deu ruim no meu cérebro, mermão. "
             "Vê se o Ollama tá ligado!"
@@ -237,6 +355,10 @@ async def pensar_ollama(
 async def gerar_voz_base64(
     texto: str
 ) -> Optional[str]:
+    """
+    Gera áudio base64 usando Edge TTS.
+    Retorna None em caso de erro.
+    """
 
     if not texto:
         return None
@@ -264,11 +386,7 @@ async def gerar_voz_base64(
         ).decode("utf-8")
 
     except Exception as e:
-
-        logger.error(
-            f"Erro na geração de voz: {e}"
-        )
-
+        logger.error(f"🔇 Erro na geração de voz: {e}")
         return None
 
 
@@ -279,15 +397,24 @@ async def gerar_voz_base64(
 async def processar_mensagem_completa(
     texto: str
 ) -> str:
+    """
+    Processa a mensagem do usuário.
+    Fluxo: visão → memória → Ollama → pesquisa → resposta final.
+    """
 
-    logger.info(
-        f"🗣️ Input recebido: {texto}"
-    )
+    logger.info(f"🗣️ Input recebido: {texto}")
 
     texto_lower = texto.lower()
 
+    memoria_pessoal = obter_memoria_pessoal(texto)
+
+    if memoria_pessoal:
+        logger.info(
+            "🧠 Memória pessoal relevante encontrada."
+        )
+
     # ------------------------------------------
-    # VISÃO
+    # 👁️ VISÃO
     # ------------------------------------------
 
     gatilhos_visao = [
@@ -306,9 +433,7 @@ async def processar_mensagem_completa(
         )
     ):
 
-        logger.info(
-            "👁️ Ativando o olho..."
-        )
+        logger.info("👁️ Ativando o olho...")
 
         descricao_tela = await ver_a_tela()
 
@@ -317,40 +442,45 @@ async def processar_mensagem_completa(
             "a tela dele.\n\n"
             f"Você viu isso:\n{descricao_tela}\n\n"
             "Descreva isso para ele com "
-            "a sua personalidade carioca."
+            "a sua personalidade."
         )
 
-        return await pensar_ollama(
+        resposta = await pensar_ollama(
             prompt_visao,
-            respondendo_pesquisa=True
+            memoria_pessoal
         )
+
+        adicionar_ao_historico(
+            texto,
+            resposta
+        )
+
+        return resposta
 
     # ------------------------------------------
-    # PRIMEIRA RESPOSTA
+    # 🧠 PRIMEIRA RESPOSTA
     # ------------------------------------------
 
     resposta_bruta = await pensar_ollama(
         texto,
-        respondendo_pesquisa=False
+        memoria_pessoal
     )
 
     # ------------------------------------------
-    # PESQUISA WEB
+    # 🔎 PESQUISA WEB
     # ------------------------------------------
 
     match = re.search(
-    r"\[PESQUISAR:\s*(.*?)\]",
-    resposta_bruta,
-    re.IGNORECASE
-        )
+        r"\[PESQUISAR:\s*(.*?)\]",
+        resposta_bruta,
+        re.IGNORECASE
+    )
 
     if match:
 
         query = match.group(1).strip()
 
-        logger.info(
-            f"🔍 Raiden pediu para pesquisar: {query}"
-        )
+        logger.info(f"🔍 Raiden pediu para pesquisar: {query}")
 
         try:
 
@@ -361,44 +491,74 @@ async def processar_mensagem_completa(
             if info_encontrada:
 
                 prompt_segunda_passada = (
-                    f"O usuário te perguntou o seguinte:\n"
-                    f"'{texto}'\n\n"
+                    "Você recebeu uma informação "
+                    "pesquisada na internet.\n\n"
+                    f"PERGUNTA ORIGINAL DO LUCAS:\n"
+                    f"{texto}\n\n"
+                )
 
-                    f"O sistema pesquisou na internet "
-                    f"e achou isso:\n"
+                # Adiciona memória pessoal se existir
+                if memoria_pessoal:
+                    prompt_segunda_passada += (
+                        f"MEMÓRIA PESSOAL RELEVANTE:\n"
+                        f"{memoria_pessoal}\n\n"
+                    )
+
+                prompt_segunda_passada += (
+                    f"INFORMAÇÃO ENCONTRADA NA WEB:\n"
                     f"{info_encontrada}\n\n"
-
-                    "Responda EXATAMENTE o que o "
-                    "usuário perguntou usando essas "
-                    "informações. "
-                    "Vá direto ao ponto."
+                    "Responda à pergunta original "
+                    "usando a informação encontrada. "
+                    "Não invente informações que não "
+                    "estejam disponíveis."
                 )
 
-                return await pensar_ollama(
-                    prompt_segunda_passada,
-                    respondendo_pesquisa=True
+                resposta_final = await pensar_ollama(
+                    prompt_segunda_passada
                 )
 
-            return (
+                adicionar_ao_historico(
+                    texto,
+                    resposta_final
+                )
+
+                return resposta_final
+
+            resposta = (
                 "Pô mermão, tentei pesquisar aqui "
                 "mas a internet não ajudou em nada."
             )
 
-        except Exception as e:
-
-            logger.error(
-                "Erro ao tentar pesquisar: "
-                f"{e}"
+            adicionar_ao_historico(
+                texto,
+                resposta
             )
 
-            return (
+            return resposta
+
+        except Exception as e:
+            logger.error(f"🔍 Erro ao pesquisar: {e}")
+
+            resposta = (
                 "Foi mal, minha conexão com "
                 "a internet caiu aqui."
             )
 
+            adicionar_ao_historico(
+                texto,
+                resposta
+            )
+
+            return resposta
+
     # ------------------------------------------
-    # RESPOSTA NORMAL
+    # 💬 RESPOSTA NORMAL
     # ------------------------------------------
+
+    adicionar_ao_historico(
+        texto,
+        resposta_bruta
+    )
 
     return resposta_bruta
 
@@ -410,6 +570,10 @@ async def processar_mensagem_completa(
 async def gerar_resposta(
     texto: str
 ) -> dict:
+    """
+    Gera resposta completa:
+    texto + áudio + expressão.
+    """
 
     resposta_texto = (
         await processar_mensagem_completa(texto)
@@ -433,73 +597,46 @@ async def gerar_resposta(
 def worker_cerebro():
     """
     Processa mensagens da fila uma por vez.
-
-    Mensagens normais:
-        fila_perguntas.put("texto")
-
-    Mensagens manuais do /chat:
-        fila_perguntas.put(
-            (texto, fila_de_retorno)
-        )
+    Mantém o worker vivo mesmo com erros.
     """
 
     loop = asyncio.new_event_loop()
-
     asyncio.set_event_loop(loop)
+
+    logger.info("🧠 Worker do cérebro iniciado.")
 
     while True:
 
-        item = fila_perguntas.get()
+        try:
+            item = fila_perguntas.get(timeout=1)
+
+        except queue.Empty:
+            continue
 
         # --------------------------------------
         # Identifica o tipo da mensagem
         # --------------------------------------
 
         if isinstance(item, tuple):
-
             comando, fila_retorno = item
-
         else:
-
             comando = item
             fila_retorno = None
 
-        logger.info(
-            f"🧠 Processando pergunta da fila: "
-            f"{comando}"
-        )
+        logger.info(f"🧠 Processando: {comando}")
 
         try:
-
             resposta = loop.run_until_complete(
                 gerar_resposta(comando)
             )
 
-            # ----------------------------------
-            # Mensagem manual
-            # ----------------------------------
-
             if fila_retorno is not None:
-
-                fila_retorno.put(
-                    resposta
-                )
-
-            # ----------------------------------
-            # YouTube / Microfone
-            # ----------------------------------
-
+                fila_retorno.put(resposta)
             else:
-
-                fila_respostas.put(
-                    resposta
-                )
+                fila_respostas.put(resposta)
 
         except Exception as e:
-
-            logger.error(
-                f"Erro no processamento da fila: {e}"
-            )
+            logger.error(f"❌ Erro no processamento: {e}")
 
             resposta_erro = {
                 "texto": (
@@ -512,19 +649,11 @@ def worker_cerebro():
             }
 
             if fila_retorno is not None:
-
-                fila_retorno.put(
-                    resposta_erro
-                )
-
+                fila_retorno.put(resposta_erro)
             else:
-
-                fila_respostas.put(
-                    resposta_erro
-                )
+                fila_respostas.put(resposta_erro)
 
         finally:
-
             fila_perguntas.task_done()
 
 
@@ -536,13 +665,11 @@ def callback_youtube(
     comando: str
 ):
     """
-    Recebe o comando do olheiro do YouTube
-    e manda para o cérebro.
+    Recebe comando do olheiro do YouTube
+    e envia para o cérebro.
     """
 
-    fila_perguntas.put(
-        comando
-    )
+    fila_perguntas.put(comando)
 
 
 # ==========================================
@@ -551,80 +678,94 @@ def callback_youtube(
 
 def escutar_microfone():
     """
-    Escuta o microfone e só envia mensagens
-    que contenham 'Raiden'.
+    Escuta o microfone e detecta o gatilho.
+    Aceita variações do nome Raiden.
     """
 
-    r = sr.Recognizer()
+    VARIACOES_RAIDEN = [
+        "raiden",
+        "rayden",
+        "haiden",
+        "reyden"
+    ]
 
+    r = sr.Recognizer()
     r.energy_threshold = 300
     r.dynamic_energy_threshold = True
     r.pause_threshold = 0.8
 
-    with calar_linux():
+    try:
+        with calar_linux():
+            mic = sr.Microphone()
 
-        mic = sr.Microphone()
+        with mic as source:
+            r.adjust_for_ambient_noise(
+                source,
+                duration=1
+            )
 
-    with mic as source:
+            logger.info(
+                "🎤 Ouvido físico ativado! "
+                "Diga 'Raiden, [sua mensagem]'."
+            )
 
-        r.adjust_for_ambient_noise(
-            source,
-            duration=1
-        )
+            while True:
 
-        logger.info(
-            "🎤 Ouvido físico ativado! "
-            "Diga 'Raiden, [sua mensagem]'."
-        )
-
-        while True:
-
-            try:
-
-                audio = r.listen(
-                    source,
-                    phrase_time_limit=8
-                )
-
-                texto = (
-                    r.recognize_google(
-                        audio,
-                        language="pt-BR"
+                try:
+                    audio = r.listen(
+                        source,
+                        phrase_time_limit=8
                     )
-                    .lower()
-                )
 
-                if "raiden" in texto:
-
-                    comando = (
-                        texto
-                        .replace(
-                            "raiden",
-                            ""
+                    texto = (
+                        r.recognize_google(
+                            audio,
+                            language="pt-BR"
                         )
-                        .strip()
+                        .lower()
                     )
+
+                    # Detecta variações do nome
+                    gatilho_encontrado = False
+
+                    for variacao in VARIACOES_RAIDEN:
+
+                        if variacao in texto:
+                            texto = texto.replace(
+                                variacao,
+                                ""
+                            )
+                            gatilho_encontrado = True
+
+                    if not gatilho_encontrado:
+                        continue
+
+                    comando = texto.strip()
 
                     if comando:
-
                         logger.info(
-                            "🎙️ Microfone captou: "
-                            f"{comando}"
+                            f"🎙️ Microfone captou: {comando}"
                         )
+                        fila_perguntas.put(comando)
 
-                        fila_perguntas.put(
-                            comando
-                        )
+                except sr.UnknownValueError:
+                    pass
 
-            except sr.UnknownValueError:
+                except sr.RequestError as e:
+                    logger.warning(
+                        f"⚠️ Erro no reconhecimento: {e}"
+                    )
+                    continue
 
-                pass
+                except Exception as e:
+                    logger.debug(
+                        f"Aviso no microfone: {e}"
+                    )
+                    continue
 
-            except Exception as e:
-
-                logger.debug(
-                    f"Aviso no microfone: {e}"
-                )
+    except Exception as e:
+        logger.error(f"❌ Erro ao iniciar microfone: {e}")
+        logger.warning("🎤 Microfone desativado por erro.")
 
 
 # ==========================================
@@ -634,50 +775,70 @@ def escutar_microfone():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
+    # ------------------------------------------
+    # Inicialização
+    # ------------------------------------------
+
+    logger.info("🚀 Inicializando Raiden Core...")
+
     iniciar_banco()
 
-    # ------------------------------------------
     # Worker do cérebro
-    # ------------------------------------------
-
     threading.Thread(
         target=worker_cerebro,
         daemon=True,
         name="TrabalhadorCerebro"
     ).start()
 
-    # ------------------------------------------
     # Microfone
-    # ------------------------------------------
-
     if MICROFONE_ATIVO:
-
         threading.Thread(
             target=escutar_microfone,
-            daemon=True
+            daemon=True,
+            name="OuvidoFisico"
         ).start()
-
-        logger.info(
-            "🎤 Ouvido físico ativado por "
-            "RAIDEN_MICROFONE_ATIVO=1."
-        )
+        logger.info("🎤 Ouvido físico ativado.")
 
     else:
+        logger.info("🎤 Ouvido físico desativado.")
 
-        logger.info(
-            "🎤 Ouvido físico desativado."
-        )
-
-    # ------------------------------------------
     # Pasta pública
-    # ------------------------------------------
-
     PASTA_PUBLIC_CHATVRM.mkdir(
         parents=True,
         exist_ok=True
     )
 
+    logger.info("🎛️ Painel local sem autenticação.")
+    logger.info("✅ Raiden Core iniciado com sucesso.")
+
     yield
+
+    # ------------------------------------------
+    # Shutdown
+    # ------------------------------------------
+
+    logger.info("🛑 Iniciando shutdown da Raiden...")
+
+    # Para os módulos
+    try:
+        yt_module.parar_olheiro()
+    except Exception:
+        pass
+
+    try:
+        front_module.parar_chatvrm()
+    except Exception:
+        pass
+
+    try:
+        pix_module.parar_tunel()
+    except Exception:
+        pass
+
+    # Limpa o histórico
+    limpar_historico()
+
+    logger.info("✅ Shutdown completo.")
 
 
 # ==========================================
@@ -686,16 +847,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Raiden Core API",
+    version="2.0.0",
     lifespan=lifespan
 )
 
+# CORS configurável
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
 )
 
+# Arquivos estáticos (público - necessário para o frontend)
 app.mount(
     "/midia",
     StaticFiles(
@@ -706,7 +871,7 @@ app.mount(
 
 
 # ==========================================
-# 💬 CHAT MANUAL
+# 💬 CHAT MANUAL (PÚBLICO)
 # ==========================================
 
 @app.post("/chat")
@@ -714,23 +879,8 @@ async def chat_endpoint(
     req: MensagemRequest
 ):
     """
-    Recebe uma mensagem manual.
-
-    A diferença importante é que agora o endpoint
-    espera a resposta do worker antes de responder
-    ao frontend.
-
-    Antes:
-        frontend -> /chat
-                  -> status
-
-    Agora:
-        frontend -> /chat
-                  -> fila
-                  -> Ollama
-                  -> TTS
-                  -> resposta
-                  -> frontend
+    Chat manual.
+    Público para permitir uso local.
     """
 
     texto = (
@@ -740,41 +890,18 @@ async def chat_endpoint(
     ).strip()
 
     if not texto:
-
         raise HTTPException(
             status_code=400,
             detail="Texto vazio!"
         )
 
-    # ------------------------------------------
-    # Cria uma fila exclusiva para essa pergunta
-    # ------------------------------------------
-
-    fila_retorno = queue.Queue(
-        maxsize=1
-    )
-
-    # ------------------------------------------
-    # Coloca a pergunta na fila principal
-    # ------------------------------------------
+    fila_retorno = queue.Queue(maxsize=1)
 
     fila_perguntas.put(
-        (
-            texto,
-            fila_retorno
-        )
+        (texto, fila_retorno)
     )
 
-    # ------------------------------------------
-    # Espera o worker responder.
-    #
-    # asyncio.to_thread evita bloquear o
-    # event loop do FastAPI enquanto esperamos
-    # a queue do Python.
-    # ------------------------------------------
-
     try:
-
         resposta = await asyncio.to_thread(
             fila_retorno.get,
             True,
@@ -784,7 +911,6 @@ async def chat_endpoint(
         return resposta
 
     except queue.Empty:
-
         raise HTTPException(
             status_code=504,
             detail=(
@@ -795,57 +921,42 @@ async def chat_endpoint(
 
 
 # ==========================================
-# 🔌 WEBSOCKET
+# 🔌 WEBSOCKET (PÚBLICO)
 # ==========================================
 
 @app.websocket("/ws")
 async def websocket_chat(websocket: WebSocket):
+    """
+    WebSocket para comunicação em tempo real.
+    Público para permitir uso local.
+    """
 
     await websocket.accept()
-
-    logger.info(
-        "🔌 WebSocket conectado."
-    )
+    logger.info("🔌 WebSocket conectado.")
 
     try:
-
         while True:
-
             texto = (
                 await websocket.receive_text()
             ).strip()
 
             if not texto:
-
                 await websocket.send_json({
                     "texto": "Manda alguma coisa aí, mermão.",
                     "audio_base64": None,
                     "expressao": "neutral"
                 })
-
                 continue
 
-            logger.info(
-                f"🔌 WebSocket recebeu: {texto}"
-            )
+            logger.info(f"🔌 WebSocket recebeu: {texto}")
 
-            # Cria uma fila exclusiva
-            # para essa mensagem.
-            fila_retorno = queue.Queue(
-                maxsize=1
-            )
+            fila_retorno = queue.Queue(maxsize=1)
 
-            # Envia para o mesmo cérebro
-            # que já usamos no /chat.
             fila_perguntas.put(
-                (
-                    texto,
-                    fila_retorno
-                )
+                (texto, fila_retorno)
             )
 
             try:
-
                 resposta = await asyncio.to_thread(
                     fila_retorno.get,
                     True,
@@ -853,7 +964,6 @@ async def websocket_chat(websocket: WebSocket):
                 )
 
             except queue.Empty:
-
                 await websocket.send_json({
                     "texto": (
                         "A Raiden demorou demais "
@@ -862,62 +972,146 @@ async def websocket_chat(websocket: WebSocket):
                     "audio_base64": None,
                     "expressao": "neutral"
                 })
-
                 continue
 
-            # Envia texto + áudio + expressão
-            # para o frontend.
-            await websocket.send_json(
-                resposta
-            )
-
-            logger.info(
-                "🔌 Resposta enviada pelo WebSocket."
-            )
+            await websocket.send_json(resposta)
+            logger.info("🔌 Resposta enviada pelo WebSocket.")
 
     except WebSocketDisconnect:
-
-        logger.info(
-            "🔌 WebSocket desconectado."
-        )
+        logger.info("🔌 WebSocket desconectado.")
 
     except Exception as e:
-
-        logger.error(
-            f"❌ Erro no WebSocket: {e}"
-        )
+        logger.error(f"❌ Erro no WebSocket: {e}")
 
         try:
-            await websocket.close(
-                code=1011
-            )
+            await websocket.close(code=1011)
         except Exception:
             pass
 
+
 # ==========================================
-# 🔊 FILA DE ÁUDIO
+# 🔊 FILA DE ÁUDIO (PÚBLICO)
 # ==========================================
 
 @app.get("/proximo_audio")
 async def proximo_audio():
     """
-    Continua existindo para respostas do
-    YouTube e microfone.
-
-    O chat manual agora recebe a resposta
-    diretamente pelo /chat.
+    Retorna o próximo áudio da fila.
+    Público para uso do frontend.
     """
 
     try:
-
         return fila_respostas.get_nowait()
 
     except queue.Empty:
-
         return {
             "texto": None,
             "audio_base64": None
         }
+
+
+# ==========================================
+# 🧹 LIMPAR HISTÓRICO
+# ==========================================
+
+@app.post("/api/chat/limpar-historico")
+async def limpar_historico_chat():
+    """
+    Limpa o histórico de conversa.
+    """
+
+    limpar_historico()
+
+    return {
+        "status": "ok",
+        "mensagem": "Histórico limpo!"
+    }
+
+
+# ==========================================
+# 🧠 MEMÓRIA PESSOAL
+# ==========================================
+
+@app.post("/api/painel/memoria/aprender")
+async def aprender_memoria(
+    req: MemoriaRequest
+):
+    """
+    Salva uma memória permanente da Raiden.
+    """
+
+    termo = req.termo.strip()
+    conteudo = req.conteudo.strip()
+    categoria = req.categoria.strip() or "geral"
+
+    if not termo or not conteudo:
+        raise HTTPException(
+            status_code=400,
+            detail="Termo e conteúdo são obrigatórios."
+        )
+
+    sucesso = aprender_memoria_pessoal(
+        termo=termo,
+        conteudo=conteudo,
+        categoria=categoria
+    )
+
+    if not sucesso:
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível salvar a memória."
+        )
+
+    return {
+        "status": "ok",
+        "mensagem": "Memória aprendida.",
+        "termo": termo,
+        "categoria": categoria
+    }
+
+
+@app.get("/api/painel/memoria")
+async def listar_memoria():
+    """
+    Lista todas as memórias pessoais da Raiden.
+    """
+
+    return {
+        "memorias": listar_memorias_pessoais()
+    }
+
+
+@app.delete("/api/painel/memoria")
+async def esquecer_memoria(
+    req: EsquecerMemoriaRequest
+):
+    """
+    Remove uma memória pessoal.
+    """
+
+    termo = req.termo.strip()
+
+    if not termo:
+        raise HTTPException(
+            status_code=400,
+            detail="Termo obrigatório."
+        )
+
+    sucesso = esquecer_memoria_pessoal(
+        termo=termo,
+        categoria=req.categoria
+    )
+
+    if not sucesso:
+        raise HTTPException(
+            status_code=404,
+            detail="Memória não encontrada."
+        )
+
+    return {
+        "status": "ok",
+        "mensagem": "Memória esquecida."
+    }
 
 
 # ==========================================
@@ -926,15 +1120,16 @@ async def proximo_audio():
 
 @app.get("/api/painel/status")
 async def painel_status():
+    """
+    Status dos módulos.
+    """
 
     return {
         "youtube": yt_module.olheiro_ativo,
-
         "frontend": (
             front_module.processo_frontend
             is not None
         ),
-
         "livepix": (
             pix_module.processo_tunel
             is not None
@@ -946,29 +1141,22 @@ async def painel_status():
 # YOUTUBE TOGGLE
 # ==========================================
 
-@app.post(
-    "/api/painel/youtube/toggle"
-)
+@app.post("/api/painel/youtube/toggle")
 async def toggle_youtube(
     req: YouTubeRequest = None
 ):
+    """
+    Liga/desliga o olheiro do YouTube.
+    """
 
     if yt_module.olheiro_ativo:
-
         yt_module.parar_olheiro()
-
-        return {
-            "status": "desligado"
-        }
+        return {"status": "desligado"}
 
     if not req or not req.link:
-
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Coloque o link da live "
-                "para ligar!"
-            )
+            detail="Coloque o link da live para ligar!"
         )
 
     sucesso = yt_module.iniciar_olheiro(
@@ -977,16 +1165,11 @@ async def toggle_youtube(
     )
 
     if sucesso:
-
-        return {
-            "status": "ligado"
-        }
+        return {"status": "ligado"}
 
     raise HTTPException(
         status_code=400,
-        detail=(
-            "Erro ao conectar no YouTube."
-        )
+        detail="Erro ao conectar no YouTube."
     )
 
 
@@ -994,37 +1177,24 @@ async def toggle_youtube(
 # FRONTEND TOGGLE
 # ==========================================
 
-@app.post(
-    "/api/painel/frontend/toggle"
-)
+@app.post("/api/painel/frontend/toggle")
 async def toggle_frontend():
+    """
+    Liga/desliga o frontend.
+    """
 
-    if (
-        front_module.processo_frontend
-        is not None
-    ):
-
+    if front_module.processo_frontend is not None:
         front_module.parar_chatvrm()
+        return {"status": "desligado"}
 
-        return {
-            "status": "desligado"
-        }
-
-    sucesso = (
-        front_module.ligar_chatvrm()
-    )
+    sucesso = front_module.ligar_chatvrm()
 
     if sucesso:
-
-        return {
-            "status": "ligado"
-        }
+        return {"status": "ligado"}
 
     raise HTTPException(
         status_code=500,
-        detail=(
-            "Erro ao iniciar o Front-end."
-        )
+        detail="Erro ao iniciar o Front-end."
     )
 
 
@@ -1032,28 +1202,19 @@ async def toggle_frontend():
 # LIVEPIX TOGGLE
 # ==========================================
 
-@app.post(
-    "/api/painel/livepix/toggle"
-)
+@app.post("/api/painel/livepix/toggle")
 async def toggle_livepix():
+    """
+    Liga/desliga o túnel LivePix.
+    """
 
-    if (
-        pix_module.processo_tunel
-        is not None
-    ):
-
+    if pix_module.processo_tunel is not None:
         pix_module.parar_tunel()
+        return {"status": "desligado"}
 
-        return {
-            "status": "desligado"
-        }
-
-    resultado = (
-        pix_module.ligar_tunel()
-    )
+    resultado = pix_module.ligar_tunel()
 
     if resultado["status"] == "ok":
-
         return {
             "status": "ligado",
             "url": resultado["url"]
@@ -1069,33 +1230,30 @@ async def toggle_livepix():
 # 🛑 PARAR TUDO
 # ==========================================
 
-@app.post(
-    "/api/painel/parar-tudo"
-)
+@app.post("/api/painel/parar-tudo")
 async def painel_parar():
+    """
+    Para todos os módulos.
+    """
 
     yt_module.parar_olheiro()
-
     front_module.parar_chatvrm()
-
     pix_module.parar_tunel()
 
-    logger.info(
-        "🛑 Comando de emergência acionado: "
-        "Tudo parado."
-    )
+    logger.info("🛑 Comando de emergência: Tudo parado.")
 
-    return {
-        "status": "ok"
-    }
+    return {"status": "ok"}
 
 
 # ==========================================
-# PAINEL WEB
+# PAINEL WEB (PÚBLICO - HTML)
 # ==========================================
 
 @app.get("/painel")
 async def abrir_painel():
+    """
+    Página HTML do painel.
+    """
 
     return FileResponse(
         PASTA_PAINEL / "dashboard.html"
@@ -1103,7 +1261,7 @@ async def abrir_painel():
 
 
 # ==========================================
-# 👗 GESTÃO DE ARQUIVOS
+# 👗 GESTÃO DE ARQUIVOS (PÚBLICO)
 # ==========================================
 
 EXTENSOES_PERMITIDAS = {
@@ -1117,56 +1275,51 @@ EXTENSOES_PERMITIDAS = {
 
 @app.get("/api/arquivos")
 async def listar_arquivos():
+    """
+    Lista arquivos de mídia.
+    Público - necessário para o frontend.
+    """
 
     modelos = []
     animacoes = []
     fundos = []
 
-    for arquivo in os.listdir(
-        PASTA_PUBLIC_CHATVRM
-    ):
-
-        caminho = (
+    try:
+        for arquivo in os.listdir(
             PASTA_PUBLIC_CHATVRM
-            / arquivo
+        ):
+
+            caminho = (
+                PASTA_PUBLIC_CHATVRM
+                / arquivo
+            )
+
+            if not caminho.is_file():
+                continue
+
+            if arquivo.lower().endswith(".vrm"):
+                modelos.append(arquivo)
+
+            elif arquivo.lower().endswith(".vrma"):
+                animacoes.append(arquivo)
+
+            elif arquivo.lower().endswith(
+                (".png", ".jpg", ".jpeg")
+            ):
+                fundos.append(arquivo)
+
+        return {
+            "modelos": modelos,
+            "animacoes": animacoes,
+            "fundos": fundos
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao listar arquivos: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao listar arquivos."
         )
-
-        if not caminho.is_file():
-            continue
-
-        if arquivo.lower().endswith(
-            ".vrm"
-        ):
-
-            modelos.append(
-                arquivo
-            )
-
-        elif arquivo.lower().endswith(
-            ".vrma"
-        ):
-
-            animacoes.append(
-                arquivo
-            )
-
-        elif arquivo.lower().endswith(
-            (
-                ".png",
-                ".jpg",
-                ".jpeg"
-            )
-        ):
-
-            fundos.append(
-                arquivo
-            )
-
-    return {
-        "modelos": modelos,
-        "animacoes": animacoes,
-        "fundos": fundos
-    }
 
 
 # ==========================================
@@ -1177,39 +1330,25 @@ async def listar_arquivos():
 async def upload_arquivo(
     file: UploadFile = File(...)
 ):
+    """
+    Upload de arquivos de mídia.
+    """
 
-    # ------------------------------------------
-    # Remove qualquer caminho enviado pelo
-    # cliente.
-    #
-    # Exemplo perigoso:
-    # ../../arquivo.py
-    #
-    # vira apenas:
-    # arquivo.py
-    # ------------------------------------------
-
+    # Sanitização do nome
     nome_arquivo = Path(
         file.filename or ""
     ).name
 
-    extensao = Path(
-        nome_arquivo
-    ).suffix.lower()
-
     if not nome_arquivo:
-
         raise HTTPException(
             status_code=400,
             detail="Nome de arquivo inválido."
         )
 
-    # ------------------------------------------
-    # Só permite arquivos usados pelo camarim.
-    # ------------------------------------------
+    # Verifica extensão
+    extensao = Path(nome_arquivo).suffix.lower()
 
     if extensao not in EXTENSOES_PERMITIDAS:
-
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1218,33 +1357,69 @@ async def upload_arquivo(
             )
         )
 
+    # Garante que o caminho está dentro da pasta
     caminho_salvar = (
-        PASTA_PUBLIC_CHATVRM
-        / nome_arquivo
+        PASTA_PUBLIC_CHATVRM / nome_arquivo
     )
 
     try:
-
-        content = await file.read()
-
-        caminho_salvar.write_bytes(
-            content
+        # Garante que está dentro da pasta pública
+        caminho_salvar.resolve().relative_to(
+            PASTA_PUBLIC_CHATVRM.resolve()
         )
 
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Caminho de arquivo inválido."
+        )
+
+    try:
+        # Leitura em chunks com limite
+        tamanho_total = 0
+        conteudo = bytearray()
+
+        while True:
+            chunk = await file.read(
+                UPLOAD_CHUNK_SIZE
+            )
+
+            if not chunk:
+                break
+
+            tamanho_total += len(chunk)
+
+            if tamanho_total > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        "Arquivo muito grande! "
+                        "Máximo: 10MB"
+                    )
+                )
+
+            conteudo.extend(chunk)
+
+        # Salva o arquivo
+        caminho_salvar.write_bytes(conteudo)
+
         logger.info(
-            "📥 Arquivo novo salvo com sucesso: "
-            f"{nome_arquivo}"
+            f"📥 Arquivo salvo: {nome_arquivo} "
+            f"({tamanho_total} bytes)"
         )
 
         return {
             "status": "ok",
-            "arquivo": nome_arquivo
+            "arquivo": nome_arquivo,
+            "tamanho": tamanho_total
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
 
+    except Exception as e:
         logger.error(
-            "Erro ao salvar arquivo "
+            f"❌ Erro ao salvar arquivo "
             f"{nome_arquivo}: {e}"
         )
 
@@ -1261,13 +1436,16 @@ async def upload_arquivo(
 if __name__ == "__main__":
 
     logger.info(
-        "🚀 API Central rodando "
-        "na porta 8000..."
+        "🚀 API Central rodando na porta 8000..."
+    )
+
+    logger.info(
+        "🌐 Host: 127.0.0.1 (somente este computador)"
     )
 
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         access_log=False
     )
