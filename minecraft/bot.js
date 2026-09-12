@@ -1,10 +1,19 @@
 const mineflayer = require("mineflayer");
-const WebSocket = require("ws");
+const viewer = require("prismarine-viewer").mineflayer;
 
+const { criarConexao } = require("./conexao");
+const { criarPercepcao } = require("./percepcao");
+const { criarMovimento } = require("./movimento");
+const { criarInventario } = require("./inventario");
+const { criarMundo } = require("./mundo");
+const { criarNavegacao } = require("./navegacao");
+const { criarAcoes } = require("./acoes");
+const { criarEventos } = require("./eventos");
+const { criarCombate } = require("./combate");
+const { criarSeguranca } = require("./seguranca");
+const { criarCrafting } = require("./crafting");
+const { criarConstrucao } = require("./construcao");
 
-// ============================================================
-// ⚙️ CONFIGURAÇÃO
-// ============================================================
 
 const MINECRAFT_CONFIG = {
     host: "127.0.0.1",
@@ -13,1536 +22,729 @@ const MINECRAFT_CONFIG = {
     version: false
 };
 
-const RAIDEN_WS_URL = "ws://127.0.0.1:8000/ws/minecraft";
 
-const INTERVALO_ESTADO = 1000;
-const INTERVALO_RECONEXAO = 3000;
-
-
-// ============================================================
-// ⛏ MINECRAFT
-// ============================================================
-
-const bot = mineflayer.createBot(MINECRAFT_CONFIG);
+const VIEWER_CONFIG = {
+    porta: 3007,
+    primeiraPessoa: true,
+    distanciaVisao: 8
+};
 
 
-// ============================================================
-// 🧠 ESTADO DA CONEXÃO
-// ============================================================
-
-let raidenWs = null;
-let intervaloEstado = null;
-let reconexaoAgendada = false;
+const bot = mineflayer.createBot(
+    MINECRAFT_CONFIG
+);
 
 
-// ============================================================
-// 🎮 CONTROLE DE AÇÕES
-// ============================================================
-
-let acaoEmExecucao = false;
-
-
-// ============================================================
-// 🧠 CONEXÃO COM A RAÍDEN
-// ============================================================
-
-function conectarRaiden() {
-
-    if (raidenWs) {
-        return;
-    }
-
-    if (!bot.entity) {
-        return;
-    }
-
-    if (reconexaoAgendada) {
-        return;
-    }
-
-    console.log(
-        "🧠 Conectando ao cérebro da Raiden..."
-    );
-
-    raidenWs = new WebSocket(RAIDEN_WS_URL);
-
-    raidenWs.on("open", () => {
-
-        console.log(
-            "🧠 Conectado ao cérebro da Raiden!"
-        );
-
-        reconexaoAgendada = false;
-
-        iniciarAtualizacaoEstado();
-
-        enviarEstado();
-
-        enviarMensagem({
-            tipo: "conexao",
-            status: "ok",
-            mensagem:
-                "Minecraft conectado à Raiden."
-        });
-    });
+const estadoBot = {
+    conectadoMinecraft: false,
+    conectadoRaiden: false,
+    ultimaAtualizacaoEstado: null,
+    ultimaAcao: null,
+    ultimoResultadoAcao: null,
+    ultimoChat: null,
+    viewerIniciado: false
+};
 
 
-    raidenWs.on("message", (data) => {
-
-        try {
-
-            const mensagem =
-                JSON.parse(data.toString());
-
-            if (mensagem.tipo !== "ack") {
-
-                console.log(
-                    "🧠 Raiden → Minecraft:",
-                    mensagem
-                );
-            }
-
-            processarMensagemRaiden(mensagem);
-
-        } catch (erro) {
-
-            console.error(
-                "❌ Mensagem inválida da Raiden:",
-                erro.message
-            );
-
-        }
-
-    });
+let conexao = null;
+let percepcao = null;
+let movimento = null;
+let inventario = null;
+let mundo = null;
+let navegacao = null;
+let acoes = null;
+let eventos = null;
+let combate = null;
+let seguranca = null;
+let crafting = null;
+let construcao = null;
 
 
-    raidenWs.on("close", () => {
-
-        console.log(
-            "🔌 Conexão com a API da Raiden encerrada."
-        );
-
-        pararAtualizacaoEstado();
-
-        raidenWs = null;
-
-        agendarReconexao();
-
-    });
-
-
-    raidenWs.on("error", (erro) => {
-
-        console.error(
-            "❌ Erro WebSocket Raiden:",
-            erro.message
-        );
-
-    });
+function agora() {
+    return new Date().toISOString();
 }
 
 
-// ============================================================
-// 🔄 RECONEXÃO
-// ============================================================
-
-function agendarReconexao() {
-
-    if (reconexaoAgendada) {
-        return;
-    }
-
-    reconexaoAgendada = true;
-
-    console.log(
-        `🔄 Tentando reconectar em ${INTERVALO_RECONEXAO / 1000}s...`
-    );
-
-    setTimeout(() => {
-
-        reconexaoAgendada = false;
-
-        if (!raidenWs && bot.entity) {
-            conectarRaiden();
-        }
-
-    }, INTERVALO_RECONEXAO);
-}
-
-
-// ============================================================
-// 📡 ENVIO PARA A RAÍDEN
-// ============================================================
-
-function enviarMensagem(mensagem) {
-
-    if (!raidenWs) {
+function enviarMensagemRaiden(
+    mensagem
+) {
+    if (!conexao) {
         return false;
     }
 
-    if (raidenWs.readyState !== WebSocket.OPEN) {
-        return false;
-    }
-
-    try {
-
-        raidenWs.send(
-            JSON.stringify(mensagem)
-        );
-
-        return true;
-
-    } catch (erro) {
-
-        console.error(
-            "❌ Erro ao enviar mensagem:",
-            erro.message
-        );
-
-        return false;
-    }
-}
-
-
-// ============================================================
-// 📡 ESTADO DO MINECRAFT
-// ============================================================
-
-function criarEstado() {
-
-    if (!bot.entity) {
-        return null;
-    }
-
-    const posicao = bot.entity.position;
-
-
-    // --------------------------------------------------------
-    // 👾 ENTIDADES
-    // --------------------------------------------------------
-
-    const entidades = Object.values(bot.entities)
-
-        .filter(entidade =>
-            entidade !== bot.entity &&
-            entidade.position
-        )
-
-        .map(entidade => ({
-
-            nome:
-                entidade.username ||
-                entidade.name ||
-                entidade.displayName ||
-                entidade.type,
-
-            tipo: entidade.type,
-
-            x: entidade.position.x,
-            y: entidade.position.y,
-            z: entidade.position.z,
-
-            distancia:
-                entidade.position.distanceTo(
-                    bot.entity.position
-                ),
-
-            vida:
-                typeof entidade.health === "number"
-                    ? entidade.health
-                    : null
-
-        }));
-
-
-    // --------------------------------------------------------
-    // 🎒 INVENTÁRIO
-    // --------------------------------------------------------
-
-    const inventario =
-        bot.inventory.items().map(item => ({
-
-            nome: item.name,
-
-            displayName:
-                item.displayName || item.name,
-
-            quantidade: item.count,
-
-            slot: item.slot
-
-        }));
-
-
-    // --------------------------------------------------------
-    // 🖐 ITEM NA MÃO
-    // --------------------------------------------------------
-
-    const itemNaMao =
-        bot.heldItem
-            ? {
-                nome: bot.heldItem.name,
-                displayName:
-                    bot.heldItem.displayName ||
-                    bot.heldItem.name,
-                quantidade:
-                    bot.heldItem.count
-            }
-            : null;
-
-
-    // --------------------------------------------------------
-    // 🌍 ESTADO
-    // --------------------------------------------------------
-
-    return {
-
-        tipo: "estado",
-
-        posicao: {
-
-            x: posicao.x,
-            y: posicao.y,
-            z: posicao.z
-
-        },
-
-        rotacao: {
-
-            yaw: bot.entity.yaw,
-            pitch: bot.entity.pitch
-
-        },
-
-        velocidade: {
-
-            x: bot.entity.velocity.x,
-            y: bot.entity.velocity.y,
-            z: bot.entity.velocity.z
-
-        },
-
-        no_chao:
-            bot.entity.onGround,
-
-        vida: bot.health,
-
-        fome: bot.food,
-
-        oxigenio:
-            typeof bot.oxygenLevel === "number"
-                ? bot.oxygenLevel
-                : null,
-
-        nivel_experiencia:
-            bot.experience
-                ? bot.experience.level
-                : 0,
-
-        item_na_mao: itemNaMao,
-
-        inventario: inventario,
-
-        entidades: entidades
-
-    };
-}
-
-
-// ============================================================
-// 📡 ENVIA ESTADO
-// ============================================================
-
-function enviarEstado() {
-
-    const estado = criarEstado();
-
-    if (!estado) {
-        return;
-    }
-
-    enviarMensagem(estado);
-}
-
-
-// ============================================================
-// ⏱ ATUALIZAÇÃO CONTÍNUA
-// ============================================================
-
-function iniciarAtualizacaoEstado() {
-
-    if (intervaloEstado) {
-        return;
-    }
-
-    console.log(
-        "📡 Atualização contínua do estado iniciada."
-    );
-
-    intervaloEstado = setInterval(() => {
-
-        enviarEstado();
-
-    }, INTERVALO_ESTADO);
-}
-
-
-function pararAtualizacaoEstado() {
-
-    if (!intervaloEstado) {
-        return;
-    }
-
-    clearInterval(intervaloEstado);
-
-    intervaloEstado = null;
-
-    console.log(
-        "📡 Atualização contínua do estado parada."
-    );
-}
-
-
-// ============================================================
-// 🧠 RECEBE COMANDOS DA RAÍDEN
-// ============================================================
-
-function processarMensagemRaiden(mensagem) {
-
-    if (!mensagem ||
-        typeof mensagem !== "object") {
-
-        return;
-    }
-
-
-    const tipo = mensagem.tipo;
-
-
-    // --------------------------------------------------------
-    // 🔌 CONEXÃO
-    // --------------------------------------------------------
-
-    if (tipo === "conexao") {
-
-        console.log(
-            "✅ Minecraft conectado ao cérebro da Raiden."
-        );
-
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // 🏓 PONG
-    // --------------------------------------------------------
-
-    if (tipo === "pong") {
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // ✅ ACK
-    // --------------------------------------------------------
-
-    if (tipo === "ack") {
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // 🎮 AÇÃO MINECRAFT
-    // --------------------------------------------------------
-
-    if (tipo === "minecraft_acao") {
-
-        executarAcaoMinecraft(mensagem);
-
-        return;
-    }
-
-
-    console.log(
-        "⚠️ Tipo de mensagem não reconhecido:",
+    return conexao.enviar(
         mensagem
     );
 }
 
 
-// ============================================================
-// 🎮 EXECUTOR DE AÇÕES
-// ============================================================
-
-async function executarAcaoMinecraft(mensagem) {
-
-    if (acaoEmExecucao) {
-
-        enviarMensagem({
-
-            tipo: "minecraft_acao_resultado",
-
-            sucesso: false,
-
-            erro:
-                "Outra ação já está sendo executada."
-
-        });
-
-        return;
-    }
-
-
-    const acao = mensagem.acao;
-
-
-    if (!acao) {
-
-        enviarMensagem({
-
-            tipo: "minecraft_acao_resultado",
-
-            sucesso: false,
-
-            erro:
-                "Ação Minecraft não especificada."
-
-        });
-
-        return;
-    }
-
-
-    acaoEmExecucao = true;
-
-
-    try {
-
-        let resultado;
-
-
-        switch (acao) {
-
-            // =================================================
-            // 🚶 MOVIMENTO
-            // =================================================
-
-            case "andar":
-
-                resultado =
-                    await executarAndar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // 🦘 PULAR
-            // =================================================
-
-            case "pular":
-
-                resultado =
-                    await executarPular();
-
-                break;
-
-
-            // =================================================
-            // 🛑 PARAR
-            // =================================================
-
-            case "parar":
-
-                resultado =
-                    executarParar();
-
-                break;
-
-
-            // =================================================
-            // 👀 OLHAR
-            // =================================================
-
-            case "olhar":
-
-                resultado =
-                    await executarOlhar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // ⚔️ ATACAR
-            // =================================================
-
-            case "atacar":
-
-                resultado =
-                    await executarAtacar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // ⛏️ QUEBRAR BLOCO
-            // =================================================
-
-            case "quebrar":
-
-                resultado =
-                    await executarQuebrar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // 🎒 EQUIPAR
-            // =================================================
-
-            case "equipar":
-
-                resultado =
-                    await executarEquipar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // 🖐️ USAR ITEM
-            // =================================================
-
-            case "usar":
-
-                resultado =
-                    await executarUsar();
-
-                break;
-
-
-            // =================================================
-            // 🗑️ JOGAR ITEM FORA
-            // =================================================
-
-            case "dropar":
-
-                resultado =
-                    await executarDropar(mensagem);
-
-                break;
-
-
-            // =================================================
-            // 💬 CHAT
-            // =================================================
-
-            case "chat":
-
-                resultado =
-                    executarChat(mensagem);
-
-                break;
-
-
-            // =================================================
-            // ❌ DESCONHECIDA
-            // =================================================
-
-            default:
-
-                resultado = {
-
-                    sucesso: false,
-
-                    erro:
-                        `Ação desconhecida: ${acao}`
-
-                };
-
-        }
-
-
-        enviarMensagem({
-
-            tipo: "minecraft_acao_resultado",
-
-            acao: acao,
-
-            ...resultado
-
-        });
-
-
-    } catch (erro) {
-
-        console.error(
-            `❌ Erro executando ação "${acao}":`,
-            erro
-        );
-
-
-        enviarMensagem({
-
-            tipo: "minecraft_acao_resultado",
-
-            acao: acao,
-
-            sucesso: false,
-
-            erro: erro.message
-
-        });
-
-
-    } finally {
-
-        acaoEmExecucao = false;
-
-    }
-}
-
-
-// ============================================================
-// 🚶 ANDAR
-// ============================================================
-
-async function executarAndar(mensagem) {
-
-    const direcao =
-        mensagem.direcao || "frente";
-
-    const duracao =
-        limitarNumero(
-            mensagem.duracao || 1,
-            0.1,
-            10
-        );
-
-
-    const controles = {
-
-        frente: {
-            forward: true
-        },
-
-        tras: {
-            back: true
-        },
-
-        esquerda: {
-            left: true
-        },
-
-        direita: {
-            right: true
-        }
-
-    };
-
-
-    const controle =
-        controles[direcao];
-
-
-    if (!controle) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                `Direção inválida: ${direcao}`
-
-        };
-
-    }
-
-
-    limparControles();
-
-
-    for (const [nome, valor]
-        of Object.entries(controle)) {
-
-        bot.setControlState(
-            nome,
-            valor
-        );
-    }
-
-
-    await esperar(
-        duracao * 1000
-    );
-
-
-    limparControles();
-
-
-    return {
-
-        sucesso: true,
-
-        direcao: direcao,
-
-        duracao: duracao
-
-    };
-}
-
-
-// ============================================================
-// 🦘 PULAR
-// ============================================================
-
-async function executarPular() {
-
-    bot.setControlState(
-        "jump",
-        true
-    );
-
-    await esperar(250);
-
-    bot.setControlState(
-        "jump",
-        false
-    );
-
-
-    return {
-
-        sucesso: true
-
-    };
-}
-
-
-// ============================================================
-// 🛑 PARAR
-// ============================================================
-
-function executarParar() {
-
-    limparControles();
-
-
-    return {
-
-        sucesso: true
-
-    };
-}
-
-
-// ============================================================
-// 🧹 LIMPAR CONTROLES
-// ============================================================
-
-function limparControles() {
-
-    const controles = [
-
-        "forward",
-        "back",
-        "left",
-        "right",
-        "jump",
-        "sprint",
-        "sneak"
-
-    ];
-
-
-    for (const controle of controles) {
-
-        bot.setControlState(
-            controle,
-            false
-        );
-
-    }
-}
-
-
-// ============================================================
-// 👀 OLHAR
-// ============================================================
-
-async function executarOlhar(mensagem) {
-
-    if (
-        typeof mensagem.yaw === "number" &&
-        typeof mensagem.pitch === "number"
-    ) {
-
-        await bot.look(
-            mensagem.yaw,
-            mensagem.pitch,
-            true
-        );
-
-
-        return {
-
-            sucesso: true,
-
-            modo: "rotacao"
-
-        };
-    }
-
-
-    if (
-        typeof mensagem.x === "number" &&
-        typeof mensagem.y === "number" &&
-        typeof mensagem.z === "number"
-    ) {
-
-        const alvo = bot.vec3(
-            mensagem.x,
-            mensagem.y,
-            mensagem.z
-        );
-
-
-        await bot.lookAt(
-            alvo,
-            true
-        );
-
-
-        return {
-
-            sucesso: true,
-
-            modo: "posicao"
-
-        };
-    }
-
-
-    return {
-
-        sucesso: false,
-
-        erro:
-            "Informe yaw/pitch ou x/y/z."
-
-    };
-}
-
-
-// ============================================================
-// ⚔️ ATACAR
-// ============================================================
-
-async function executarAtacar(mensagem) {
-
-    let entidade = null;
-
-
-    // --------------------------------------------------------
-    // ID DA ENTIDADE
-    // --------------------------------------------------------
-
-    if (mensagem.id !== undefined) {
-
-        entidade =
-            bot.entities[mensagem.id];
-
-    }
-
-
-    // --------------------------------------------------------
-    // NOME DA ENTIDADE
-    // --------------------------------------------------------
-
-    if (!entidade &&
-        mensagem.nome) {
-
-        entidade =
-            Object.values(bot.entities)
-                .find(e => {
-
-                    const nome =
-                        e.username ||
-                        e.name ||
-                        e.displayName;
-
-                    return nome === mensagem.nome;
-
-                });
-
-    }
-
-
-    if (!entidade) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Entidade não encontrada."
-
-        };
-
-    }
-
-
-    if (!entidade.position) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Entidade não possui posição."
-
-        };
-
-    }
-
-
-    const distancia =
-        entidade.position.distanceTo(
-            bot.entity.position
-        );
-
-
-    if (distancia > 4) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                `Entidade está a ${distancia.toFixed(2)} blocos.`
-
-        };
-
-    }
-
-
-    await bot.lookAt(
-        entidade.position.offset(
-            0,
-            entidade.height
-                ? entidade.height * 0.5
-                : 0.5,
-            0
-        ),
-        true
-    );
-
-
-    bot.attack(entidade);
-
-
-    return {
-
-        sucesso: true,
-
-        entidade:
-            entidade.username ||
-            entidade.name ||
-            entidade.displayName ||
-            entidade.type
-
-    };
-}
-
-
-// ============================================================
-// ⛏️ QUEBRAR BLOCO
-// ============================================================
-
-async function executarQuebrar(mensagem) {
-
-    if (
-        typeof mensagem.x !== "number" ||
-        typeof mensagem.y !== "number" ||
-        typeof mensagem.z !== "number"
-    ) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Informe x, y e z do bloco."
-
-        };
-
-    }
-
-
-    const posicao = bot.vec3(
-        mensagem.x,
-        mensagem.y,
-        mensagem.z
-    );
-
-
-    const bloco =
-        bot.blockAt(posicao);
-
-
-    if (!bloco) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Não foi possível encontrar o bloco."
-
-        };
-
-    }
-
-
-    if (bloco.name === "air") {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "O bloco já é ar."
-
-        };
-
-    }
-
-
-    if (!bot.canDigBlock(bloco)) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                `Não posso quebrar ${bloco.name}.`
-
-        };
-
-    }
-
-
-    await bot.lookAt(
-        bloco.position.offset(
-            0.5,
-            0.5,
-            0.5
-        ),
-        true
-    );
-
-
-    await bot.dig(bloco);
-
-
-    return {
-
-        sucesso: true,
-
-        bloco: bloco.name,
-
-        x: bloco.position.x,
-        y: bloco.position.y,
-        z: bloco.position.z
-
-    };
-}
-
-
-// ============================================================
-// 🎒 EQUIPAR
-// ============================================================
-
-async function executarEquipar(mensagem) {
-
-    if (!mensagem.nome) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Informe o nome do item."
-
-        };
-
-    }
-
-
-    const item =
-        bot.inventory.items()
-            .find(item =>
-                item.name === mensagem.nome
-            );
-
-
-    if (!item) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                `Item "${mensagem.nome}" não encontrado.`
-
-        };
-
-    }
-
-
-    const destino =
-        mensagem.destino || "hand";
-
-
-    await bot.equip(
-        item,
-        destino
-    );
-
-
-    return {
-
-        sucesso: true,
-
-        item: item.name,
-
-        destino: destino
-
-    };
-}
-
-
-// ============================================================
-// 🖐️ USAR ITEM
-// ============================================================
-
-async function executarUsar() {
-
-    bot.activateItem();
-
-    await esperar(500);
-
-    bot.deactivateItem();
-
-
-    return {
-
-        sucesso: true
-
-    };
-}
-
-
-// ============================================================
-// 🗑️ DROPAR ITEM
-// ============================================================
-
-async function executarDropar(mensagem) {
-
-    if (!mensagem.nome) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Informe o nome do item."
-
-        };
-
-    }
-
-
-    const item =
-        bot.inventory.items()
-            .find(item =>
-                item.name === mensagem.nome
-            );
-
-
-    if (!item) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                `Item "${mensagem.nome}" não encontrado.`
-
-        };
-
-    }
-
-
-    const quantidade =
-        limitarNumero(
-            mensagem.quantidade ||
-            item.count,
-            1,
-            item.count
-        );
-
-
-    if (quantidade === item.count) {
-
-        await bot.tossStack(item);
-
-    } else {
-
-        await bot.toss(
-            item.type,
-            null,
-            quantidade
-        );
-
-    }
-
-
-    return {
-
-        sucesso: true,
-
-        item: item.name,
-
-        quantidade: quantidade
-
-    };
-}
-
-
-// ============================================================
-// 💬 CHAT
-// ============================================================
-
-function executarChat(mensagem) {
-
-    if (!mensagem.mensagem) {
-
-        return {
-
-            sucesso: false,
-
-            erro:
-                "Mensagem de chat vazia."
-
-        };
-
-    }
-
-
-    bot.chat(
-        String(mensagem.mensagem)
-    );
-
-
-    return {
-
-        sucesso: true
-
-    };
-}
-
-
-// ============================================================
-// 🔢 LIMITADOR
-// ============================================================
-
-function limitarNumero(
-    valor,
-    minimo,
-    maximo
+function enviarEvento(
+    evento,
+    dados = {}
 ) {
-
-    const numero =
-        Number(valor);
-
-
-    if (!Number.isFinite(numero)) {
-        return minimo;
-    }
-
-
-    return Math.min(
-        Math.max(
-            numero,
-            minimo
-        ),
-        maximo
-    );
-}
-
-
-// ============================================================
-// ⏳ ESPERA
-// ============================================================
-
-function esperar(ms) {
-
-    return new Promise(resolve => {
-
-        setTimeout(
-            resolve,
-            ms
-        );
-
+    return enviarMensagemRaiden({
+        tipo: "minecraft_evento",
+        evento,
+        timestamp: agora(),
+        ...dados
     });
 }
 
 
-// ============================================================
-// ⛏ SPAWN
-// ============================================================
+function chat(mensagem) {
+    if (!bot.player) {
+        return false;
+    }
 
-bot.once("spawn", () => {
+    try {
+        const texto =
+            String(mensagem);
 
-    console.log(
-        "⛏️ RAÍDEN ENTROU NO MINECRAFT!"
-    );
+        bot.chat(texto);
 
+        estadoBot.ultimoChat = {
+            mensagem: texto,
+            timestamp: agora()
+        };
 
-    console.log(
-        "📍 Posição inicial:",
-        {
+        return true;
 
-            x: bot.entity.position.x,
-            y: bot.entity.position.y,
-            z: bot.entity.position.z
-
-        }
-    );
-
-
-    conectarRaiden();
-
-});
-
-
-// ============================================================
-// 💬 CHAT
-// ============================================================
-
-bot.on(
-    "chat",
-    (username, message) => {
-
-        console.log(
-            `💬 ${username}: ${message}`
+    } catch (erro) {
+        console.error(
+            "❌ Erro ao enviar chat:",
+            erro.message
         );
 
-        enviarMensagem({
+        return false;
+    }
+}
 
-            tipo: "minecraft_chat",
 
-            usuario: username,
+function criarEstado() {
+    const estadoPercepcao =
+        percepcao &&
+        typeof percepcao.obterEstado ===
+            "function"
+            ? percepcao.obterEstado()
+            : {};
 
-            mensagem: message
+    return {
+        ...estadoPercepcao,
 
+        conectadoMinecraft:
+            estadoBot.conectadoMinecraft,
+
+        conectadoRaiden:
+            estadoBot.conectadoRaiden,
+
+        ultimaAtualizacaoEstado:
+            estadoBot.ultimaAtualizacaoEstado,
+
+        movimento:
+            movimento &&
+            typeof movimento.obterEstado ===
+                "function"
+                ? movimento.obterEstado()
+                : null,
+
+        inventario:
+            inventario &&
+            typeof inventario.obterEstado ===
+                "function"
+                ? inventario.obterEstado()
+                : null,
+
+        navegacao:
+            navegacao &&
+            typeof navegacao.obterEstado ===
+                "function"
+                ? navegacao.obterEstado()
+                : null,
+
+        combate:
+            combate &&
+            typeof combate.obterEstado ===
+                "function"
+                ? combate.obterEstado()
+                : null,
+
+        seguranca:
+            seguranca &&
+            typeof seguranca.obterEstado ===
+                "function"
+                ? seguranca.obterEstado()
+                : null,
+
+        crafting:
+            crafting &&
+            typeof crafting.obterEstado ===
+                "function"
+                ? crafting.obterEstado()
+                : null,
+
+        construcao:
+            construcao &&
+            typeof construcao.obterEstado ===
+                "function"
+                ? construcao.obterEstado()
+                : null,
+
+        ultimaAcao:
+            estadoBot.ultimaAcao,
+
+        ultimoResultadoAcao:
+            estadoBot.ultimoResultadoAcao,
+
+        ultimoChat:
+            estadoBot.ultimoChat
+    };
+}
+
+
+function registrarResultadoAcao(
+    acao,
+    parametros,
+    resultado
+) {
+    estadoBot.ultimaAcao = {
+        acao,
+        parametros,
+        timestamp: agora()
+    };
+
+    estadoBot.ultimoResultadoAcao = {
+        acao,
+        resultado,
+        timestamp: agora()
+    };
+
+    enviarMensagemRaiden({
+        tipo:
+            "minecraft_acao_resultado",
+
+        acao,
+
+        sucesso:
+            !!resultado?.sucesso,
+
+        resultado,
+
+        timestamp: agora()
+    });
+}
+
+
+async function executarAcao(
+    acao,
+    parametros = {}
+) {
+    if (!acoes) {
+        return {
+            sucesso: false,
+            acao,
+            erro:
+                "Sistema de ações ainda não inicializado."
+        };
+    }
+
+    try {
+        const resultado =
+            await acoes.executar(
+                acao,
+                parametros
+            );
+
+        registrarResultadoAcao(
+            acao,
+            parametros,
+            resultado
+        );
+
+        return resultado;
+
+    } catch (erro) {
+        const resultado = {
+            sucesso: false,
+            acao,
+            erro:
+                erro?.message ||
+                String(erro)
+        };
+
+        registrarResultadoAcao(
+            acao,
+            parametros,
+            resultado
+        );
+
+        return resultado;
+    }
+}
+
+
+function processarMensagemRaiden(
+    mensagem
+) {
+    if (
+        !mensagem ||
+        typeof mensagem !== "object"
+    ) {
+        return;
+    }
+
+    switch (mensagem.tipo) {
+        case "ping":
+            enviarMensagemRaiden({
+                tipo: "pong",
+                timestamp: agora()
+            });
+            break;
+
+
+        case "estado_solicitar":
+            if (conexao) {
+                conexao.enviarEstado();
+            }
+            break;
+
+
+        case "minecraft_acao":
+            executarAcao(
+                mensagem.acao,
+                mensagem.parametros || {}
+            );
+            break;
+
+
+        case "cancelar_acao":
+            executarAcao(
+                "parar",
+                {}
+            );
+            break;
+
+
+        case "parar_tudo":
+            if (seguranca) {
+                seguranca.pararTudo();
+            } else if (movimento) {
+                movimento.parar();
+            }
+
+            enviarMensagemRaiden({
+                tipo: "ack",
+                origem: "minecraft",
+                evento: "parar_tudo",
+                timestamp: agora()
+            });
+
+            break;
+
+
+        default:
+            enviarMensagemRaiden({
+                tipo: "ack",
+                origem: "minecraft",
+                evento:
+                    "mensagem_recebida",
+                mensagem:
+                    mensagem.tipo || null,
+                timestamp: agora()
+            });
+
+            break;
+    }
+}
+
+
+const contexto = {
+    bot,
+
+    config:
+        MINECRAFT_CONFIG,
+
+    estado:
+        estadoBot,
+
+    enviarMensagem:
+        enviarMensagemRaiden,
+
+    enviarEvento,
+
+    criarEstado,
+
+    chat,
+
+    percepcao: null,
+    movimento: null,
+    inventario: null,
+    mundo: null,
+    navegacao: null,
+    acoes: null,
+    eventos: null,
+    combate: null,
+    seguranca: null,
+    crafting: null,
+    construcao: null,
+    conexao: null
+};
+
+
+percepcao =
+    criarPercepcao(
+        contexto
+    );
+
+contexto.percepcao =
+    percepcao;
+
+
+movimento =
+    criarMovimento(
+        contexto
+    );
+
+contexto.movimento =
+    movimento;
+
+
+inventario =
+    criarInventario(
+        contexto
+    );
+
+contexto.inventario =
+    inventario;
+
+
+mundo =
+    criarMundo(
+        contexto
+    );
+
+contexto.mundo =
+    mundo;
+
+
+navegacao =
+    criarNavegacao(
+        contexto
+    );
+
+contexto.navegacao =
+    navegacao;
+
+
+combate =
+    criarCombate(
+        contexto
+    );
+
+contexto.combate =
+    combate;
+
+
+seguranca =
+    criarSeguranca(
+        contexto
+    );
+
+contexto.seguranca =
+    seguranca;
+
+
+crafting =
+    criarCrafting(
+        contexto
+    );
+
+contexto.crafting =
+    crafting;
+
+
+construcao =
+    criarConstrucao(
+        contexto
+    );
+
+contexto.construcao =
+    construcao;
+
+
+acoes =
+    criarAcoes(
+        contexto
+    );
+
+contexto.acoes =
+    acoes;
+
+
+eventos =
+    criarEventos(
+        contexto
+    );
+
+contexto.eventos =
+    eventos;
+
+
+conexao =
+    criarConexao(
+        contexto
+    );
+
+contexto.conexao =
+    conexao;
+
+
+conexao.definirCallback(
+    "mensagem",
+    processarMensagemRaiden
+);
+
+
+conexao.definirCallback(
+    "aberta",
+    () => {
+        estadoBot.conectadoRaiden =
+            true;
+
+        console.log(
+            "🧠 Conectado ao cérebro da Raiden!"
+        );
+
+        enviarMensagemRaiden({
+            tipo: "minecraft_status",
+            status: "conectado",
+            timestamp: agora()
         });
-
     }
 );
 
 
-// ============================================================
-// 🧭 EVENTOS DE MOVIMENTO
-// ============================================================
-
-bot.on("move", () => {
-
-    // O estado completo é enviado
-    // pelo intervalo principal.
-
-});
-
-
-// ============================================================
-// ❤️ VIDA
-// ============================================================
-
-bot.on("health", () => {
-
-    enviarEstado();
-
-});
-
-
-// ============================================================
-// 🎒 INVENTÁRIO
-// ============================================================
-
-bot.on("windowUpdate", () => {
-
-    enviarEstado();
-
-});
-
-
-// ============================================================
-// ❌ KICK
-// ============================================================
-
-bot.on(
-    "kicked",
-    (reason) => {
+conexao.definirCallback(
+    "fechada",
+    () => {
+        estadoBot.conectadoRaiden =
+            false;
 
         console.log(
-            "❌ Bot expulso:",
-            reason
+            "🔌 Conexão com a API da Raiden encerrada."
         );
-
     }
 );
 
 
-// ============================================================
-// ❌ ERROS
-// ============================================================
+conexao.definirCallback(
+    "erro",
+    erro => {
+        console.error(
+            "❌ Erro na conexão com a API:",
+            erro?.message || erro
+        );
+    }
+);
+
+
+eventos.registrar();
+
+navegacao.registrarEventos();
+
+
+bot.once(
+    "spawn",
+    () => {
+        estadoBot.conectadoMinecraft =
+            true;
+
+        console.log(
+            "⛏️ RAÍDEN ENTROU NO MINECRAFT!"
+        );
+
+        console.log(
+            "📍 Posição inicial:",
+            {
+                x:
+                    bot.entity.position.x,
+
+                y:
+                    bot.entity.position.y,
+
+                z:
+                    bot.entity.position.z
+            }
+        );
+
+
+        if (
+            !estadoBot.viewerIniciado
+        ) {
+            try {
+                viewer(
+                    bot,
+                    {
+                        port:
+                            VIEWER_CONFIG.porta,
+
+                        firstPerson:
+                            VIEWER_CONFIG.primeiraPessoa,
+
+                        viewDistance:
+                            VIEWER_CONFIG.distanciaVisao
+                    }
+                );
+
+                estadoBot.viewerIniciado =
+                    true;
+
+                console.log(
+                    `👁️ Viewer iniciado em http://127.0.0.1:${VIEWER_CONFIG.porta}`
+                );
+
+            } catch (erro) {
+                console.error(
+                    "❌ Erro ao iniciar viewer:",
+                    erro.message
+                );
+            }
+        }
+
+
+        try {
+            navegacao.inicializar();
+
+            console.log(
+                "🧭 Navegação inicializada."
+            );
+
+        } catch (erro) {
+            console.error(
+                "❌ Erro ao inicializar navegação:",
+                erro.message
+            );
+        }
+
+
+        conexao.conectar();
+    }
+);
+
+
+bot.on(
+    "physicsTick",
+    () => {
+        if (
+            !estadoBot.conectadoMinecraft
+        ) {
+            return;
+        }
+
+        estadoBot.ultimaAtualizacaoEstado =
+            agora();
+    }
+);
+
+
+bot.on(
+    "end",
+    () => {
+        estadoBot.conectadoMinecraft =
+            false;
+
+        estadoBot.conectadoRaiden =
+            false;
+
+        try {
+            navegacao.parar();
+        } catch (_) {}
+
+        try {
+            combate.parar();
+        } catch (_) {}
+
+        try {
+            movimento.parar();
+        } catch (_) {}
+
+        try {
+            conexao.desconectar();
+        } catch (_) {}
+
+        console.log(
+            "🔌 Raiden saiu do Minecraft."
+        );
+    }
+);
+
 
 bot.on(
     "error",
-    (error) => {
-
+    erro => {
         console.error(
             "❌ Erro Mineflayer:",
-            error.message
+            erro.message
         );
-
     }
 );
 
 
-// ============================================================
-// 🔌 ENCERRAMENTO
-// ============================================================
-
-bot.on("end", () => {
-
+function desligar() {
     console.log(
-        "🔌 Raiden saiu do Minecraft."
+        "\n🛑 Encerrando Raiden Minecraft..."
     );
 
+    try {
+        seguranca.pararTudo();
+    } catch (_) {}
 
-    pararAtualizacaoEstado();
+    try {
+        eventos.destruir();
+    } catch (_) {}
 
+    try {
+        conexao.desconectar();
+    } catch (_) {}
 
-    if (raidenWs) {
-
-        try {
-            raidenWs.close();
-        } catch (erro) {
-            // Ignora erro de fechamento.
-        }
-
-        raidenWs = null;
-
+    try {
+        bot.quit(
+            "Raiden encerrando."
+        );
+    } catch (_) {
+        process.exit(0);
     }
+}
 
-});
+
+process.once(
+    "SIGINT",
+    desligar
+);
+
+process.once(
+    "SIGTERM",
+    desligar
+);
+
+
+module.exports = {
+    bot,
+    contexto,
+    estadoBot,
+
+    percepcao,
+    movimento,
+    inventario,
+    mundo,
+    navegacao,
+    acoes,
+    eventos,
+    combate,
+    seguranca,
+    crafting,
+    construcao,
+    conexao,
+
+    executarAcao,
+    criarEstado
+};
