@@ -342,16 +342,14 @@ function processarMensagemRaiden(
 
 
         default:
-            enviarMensagemRaiden({
-                tipo: "ack",
-                origem: "minecraft",
-                evento:
-                    "mensagem_recebida",
-                mensagem:
-                    mensagem.tipo || null,
-                timestamp: agora()
-            });
-
+            // Mensagens desconhecidas são ignoradas.
+            //
+            // IMPORTANTE:
+            // Não enviar ACK aqui.
+            //
+            // Antes, qualquer mensagem não reconhecida
+            // gerava outro "ack", podendo criar um loop
+            // de mensagens entre o bot e a API.
             break;
     }
 }

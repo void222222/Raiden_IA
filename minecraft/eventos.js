@@ -3,20 +3,38 @@ function criarEventos(contexto) {
 
     const listeners = [];
 
+    // --------------------------------------------------------
+    // 👁️ BOLHA DE PERCEPÇÃO DA RAIDEN
+    // --------------------------------------------------------
+
+    const RAIO_PERCEPCAO = 30;
+    const RAIO_PERCEPCAO_QUADRADO =
+        RAIO_PERCEPCAO * RAIO_PERCEPCAO;
+
+    // --------------------------------------------------------
+    // 🔌 EMISSÃO
+    // --------------------------------------------------------
+
     function emitir(
         evento,
         dados = {}
     ) {
         if (
-            typeof contexto.enviarEvento ===
+            typeof contexto.enviarEvento !==
             "function"
         ) {
-            contexto.enviarEvento(
-                evento,
-                dados
-            );
+            return false;
         }
+
+        return contexto.enviarEvento(
+            evento,
+            dados
+        );
     }
+
+    // --------------------------------------------------------
+    // 🎧 REGISTRO GENÉRICO
+    // --------------------------------------------------------
 
     function registrar(
         evento,
@@ -33,10 +51,96 @@ function criarEventos(contexto) {
         });
     }
 
+    // --------------------------------------------------------
+    // 🧰 HELPERS DE ESTADO
+    // --------------------------------------------------------
+
+    function posicaoParaJson(posicao) {
+        if (!posicao) {
+            return null;
+        }
+
+        return {
+            x: posicao.x,
+            y: posicao.y,
+            z: posicao.z
+        };
+    }
+
+    function entidadeParaJson(entidade) {
+        if (!entidade) {
+            return null;
+        }
+
+        return {
+            id: entidade.id,
+            nome: entidade.name || null,
+            tipo: entidade.type || null,
+            posicao: posicaoParaJson(
+                entidade.position
+            )
+        };
+    }
+
+    // --------------------------------------------------------
+    // 👁️ DISTÂNCIA DA BOLHA
+    // --------------------------------------------------------
+
+    function entidadeDentroDaBolha(
+        entidade
+    ) {
+        if (!entidade) {
+            return false;
+        }
+
+        const posicaoRaiden =
+            bot.entity?.position;
+
+        const posicaoEntidade =
+            entidade.position;
+
+        if (
+            !posicaoRaiden ||
+            !posicaoEntidade
+        ) {
+            return false;
+        }
+
+        const dx =
+            posicaoEntidade.x -
+            posicaoRaiden.x;
+
+        const dy =
+            posicaoEntidade.y -
+            posicaoRaiden.y;
+
+        const dz =
+            posicaoEntidade.z -
+            posicaoRaiden.z;
+
+        const distanciaQuadrada =
+            dx * dx +
+            dy * dy +
+            dz * dz;
+
+        return (
+            distanciaQuadrada <=
+            RAIO_PERCEPCAO_QUADRADO
+        );
+    }
+
+    // --------------------------------------------------------
+    // 🎬 REGISTRO DE TODOS OS EVENTOS
+    // --------------------------------------------------------
+
     function registrarTodos() {
         if (listeners.length > 0) {
             return false;
         }
+
+        // ====================================================
+        // 🌍 CICLO DE VIDA DO BOT
+        // ====================================================
 
         registrar(
             "spawn",
@@ -45,42 +149,9 @@ function criarEventos(contexto) {
                     "spawn",
                     {
                         posicao:
-                            bot.entity?.position
-                                ? {
-                                    x: bot.entity.position.x,
-                                    y: bot.entity.position.y,
-                                    z: bot.entity.position.z
-                                }
-                                : null
-                    }
-                );
-            }
-        );
-
-        registrar(
-            "chat",
-            (
-                username,
-                mensagem
-            ) => {
-                emitir(
-                    "chat",
-                    {
-                        jogador:
-                            username,
-                        mensagem
-                    }
-                );
-            }
-        );
-
-        registrar(
-            "messagestr",
-            mensagem => {
-                emitir(
-                    "mensagem",
-                    {
-                        mensagem
+                            posicaoParaJson(
+                                bot.entity?.position
+                            )
                     }
                 );
             }
@@ -99,6 +170,73 @@ function criarEventos(contexto) {
                 emitir("respawn");
             }
         );
+
+        registrar(
+            "end",
+            motivo => {
+                emitir(
+                    "desconectado",
+                    {
+                        motivo:
+                            motivo || null
+                    }
+                );
+            }
+        );
+
+        registrar(
+            "kicked",
+            (
+                razao,
+                mensagem,
+                options
+            ) => {
+                emitir(
+                    "expulso",
+                    {
+                        razao,
+                        mensagem,
+                        options
+                    }
+                );
+            }
+        );
+
+        // ====================================================
+        // 💬 COMUNICAÇÃO
+        // ====================================================
+
+        registrar(
+            "chat",
+            (
+                username,
+                mensagem
+            ) => {
+                emitir(
+                    "chat",
+                    {
+                        jogador: username,
+                        mensagem
+                    }
+                );
+            }
+        );
+
+        registrar(
+            "messagestr",
+            mensagem => {
+                emitir(
+                    "mensagem",
+                    {
+                        mensagem
+                    }
+                );
+            }
+        );
+
+        // ====================================================
+        // ❤️ ESTADO DO CORPO
+        // ====================================================
 
         registrar(
             "health",
@@ -124,9 +262,11 @@ function criarEventos(contexto) {
                         nivel:
                             experiencia?.level ??
                             0,
+
                         experiencia:
                             experiencia?.progress ??
                             0,
+
                         pontos:
                             experiencia?.points ??
                             0
@@ -135,6 +275,18 @@ function criarEventos(contexto) {
             }
         );
 
+        // ====================================================
+        // 🧍 ENTIDADES
+        // ====================================================
+        //
+        // A Raiden só recebe entidades dentro da bolha
+        // de 30 blocos ao redor dela.
+        //
+        // O Mineflayer continua carregando entidades
+        // normalmente. O filtro acontece somente na
+        // comunicação com a Raiden.
+        // ====================================================
+
         registrar(
             "entitySpawn",
             entidade => {
@@ -142,25 +294,19 @@ function criarEventos(contexto) {
                     return;
                 }
 
+                if (
+                    !entidadeDentroDaBolha(
+                        entidade
+                    )
+                ) {
+                    return;
+                }
+
                 emitir(
                     "entidade_spawn",
-                    {
-                        id: entidade.id,
-                        nome:
-                            entidade.name ||
-                            null,
-                        tipo:
-                            entidade.type ||
-                            null,
-                        posicao:
-                            entidade.position
-                                ? {
-                                    x: entidade.position.x,
-                                    y: entidade.position.y,
-                                    z: entidade.position.z
-                                }
-                                : null
-                    }
+                    entidadeParaJson(
+                        entidade
+                    )
                 );
             }
         );
@@ -172,20 +318,26 @@ function criarEventos(contexto) {
                     return;
                 }
 
+                if (
+                    !entidadeDentroDaBolha(
+                        entidade
+                    )
+                ) {
+                    return;
+                }
+
                 emitir(
                     "entidade_saiu",
-                    {
-                        id: entidade.id,
-                        nome:
-                            entidade.name ||
-                            null,
-                        tipo:
-                            entidade.type ||
-                            null
-                    }
+                    entidadeParaJson(
+                        entidade
+                    )
                 );
             }
         );
+
+        // ====================================================
+        // 🎒 INVENTÁRIO / COLETA
+        // ====================================================
 
         registrar(
             "playerCollect",
@@ -199,23 +351,19 @@ function criarEventos(contexto) {
                         coletor:
                             collector?.username ||
                             null,
+
                         entidade:
-                            collected
-                                ? {
-                                    id:
-                                        collected.id,
-                                    nome:
-                                        collected.name ||
-                                        null,
-                                    tipo:
-                                        collected.type ||
-                                        null
-                                }
-                                : null
+                            entidadeParaJson(
+                                collected
+                            )
                     }
                 );
             }
         );
+
+        // ====================================================
+        // ⛏️ MUNDO
+        // ====================================================
 
         registrar(
             "diggingCompleted",
@@ -226,17 +374,11 @@ function criarEventos(contexto) {
                         nome:
                             bloco?.name ||
                             null,
+
                         posicao:
-                            bloco?.position
-                                ? {
-                                    x:
-                                        bloco.position.x,
-                                    y:
-                                        bloco.position.y,
-                                    z:
-                                        bloco.position.z
-                                }
-                                : null
+                            posicaoParaJson(
+                                bloco?.position
+                            )
                     }
                 );
             }
@@ -255,23 +397,9 @@ function criarEventos(contexto) {
             }
         );
 
-        registrar(
-            "kicked",
-            (
-                razao,
-                mensagem,
-                options
-            ) => {
-                emitir(
-                    "expulso",
-                    {
-                        razao,
-                        mensagem,
-                        options
-                    }
-                );
-            }
-        );
+        // ====================================================
+        // ⚠️ ERROS
+        // ====================================================
 
         registrar(
             "error",
@@ -287,22 +415,12 @@ function criarEventos(contexto) {
             }
         );
 
-        registrar(
-            "end",
-            motivo => {
-                emitir(
-                    "desconectado",
-                    {
-                        motivo:
-                            motivo ||
-                            null
-                    }
-                );
-            }
-        );
-
         return true;
     }
+
+    // --------------------------------------------------------
+    // 🧹 DESTRUIR
+    // --------------------------------------------------------
 
     function destruir() {
         for (
@@ -319,6 +437,10 @@ function criarEventos(contexto) {
         return true;
     }
 
+    // --------------------------------------------------------
+    // 📋 INSPEÇÃO
+    // --------------------------------------------------------
+
     function obterEventos() {
         return listeners.map(
             listener =>
@@ -330,10 +452,18 @@ function criarEventos(contexto) {
         return {
             listeners:
                 listeners.length,
+
             eventos:
-                obterEventos()
+                obterEventos(),
+
+            raioPercepcao:
+                RAIO_PERCEPCAO
         };
     }
+
+    // --------------------------------------------------------
+    // 📦 API PÚBLICA
+    // --------------------------------------------------------
 
     return {
         registrar: registrarTodos,
