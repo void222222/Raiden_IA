@@ -15,7 +15,6 @@ const { criarCrafting } = require("./crafting");
 const { criarConstrucao } = require("./construcao");
 const { criarAutonomia } = require("./autonomia");
 
-
 const MINECRAFT_CONFIG = {
     host: "127.0.0.1",
     port: 25565,
@@ -23,18 +22,13 @@ const MINECRAFT_CONFIG = {
     version: false
 };
 
-
 const VIEWER_CONFIG = {
     porta: 3007,
     primeiraPessoa: true,
     distanciaVisao: 8
 };
 
-
-const bot = mineflayer.createBot(
-    MINECRAFT_CONFIG
-);
-
+const bot = mineflayer.createBot(MINECRAFT_CONFIG);
 
 const estadoBot = {
     conectadoMinecraft: false,
@@ -45,7 +39,6 @@ const estadoBot = {
     ultimoChat: null,
     viewerIniciado: false
 };
-
 
 let conexao = null;
 let percepcao = null;
@@ -61,29 +54,19 @@ let crafting = null;
 let construcao = null;
 let autonomia = null;
 
-
 function agora() {
     return new Date().toISOString();
 }
 
-
-function enviarMensagemRaiden(
-    mensagem
-) {
+function enviarMensagemRaiden(mensagem) {
     if (!conexao) {
         return false;
     }
 
-    return conexao.enviar(
-        mensagem
-    );
+    return conexao.enviar(mensagem);
 }
 
-
-function enviarEvento(
-    evento,
-    dados = {}
-) {
+function enviarEvento(evento, dados = {}) {
     return enviarMensagemRaiden({
         tipo: "minecraft_evento",
         evento,
@@ -92,15 +75,13 @@ function enviarEvento(
     });
 }
 
-
 function chat(mensagem) {
     if (!bot.player) {
         return false;
     }
 
     try {
-        const texto =
-            String(mensagem);
+        const texto = String(mensagem);
 
         bot.chat(texto);
 
@@ -110,7 +91,6 @@ function chat(mensagem) {
         };
 
         return true;
-
     } catch (erro) {
         console.error(
             "❌ Erro ao enviar chat:",
@@ -121,12 +101,253 @@ function chat(mensagem) {
     }
 }
 
+// ============================================================
+// 🧪 DIAGNÓSTICO DO MINECRAFT / CRAFTING
+// ============================================================
+//
+// Este diagnóstico é temporário.
+//
+// Objetivo:
+// descobrir por que:
+//     bot.registry.itemsByName.oak_planks
+// existe,
+// mas:
+//     bot.recipesFor(oak_planks.id)
+// retorna 0 receitas.
+//
+// Não altera a lógica do bot.
+// Apenas imprime informações no terminal.
+// ============================================================
+
+function diagnosticarReceitasMinecraft() {
+    console.log("");
+    console.log("════════════════════════════════════════════");
+    console.log("🧪 DIAGNÓSTICO DO SISTEMA DE CRAFTING");
+    console.log("════════════════════════════════════════════");
+
+    // --------------------------------------------------------
+    // 🎮 VERSÃO
+    // --------------------------------------------------------
+
+    console.log(
+        "🧪 Versão Minecraft:",
+        bot.version
+    );
+
+    console.log(
+        "🧪 Versão do protocolo:",
+        bot.protocolVersion
+    );
+
+    console.log(
+        "🧪 Registry disponível:",
+        !!bot.registry
+    );
+
+    if (!bot.registry) {
+        console.error(
+            "❌ Registry do Minecraft ainda não está disponível."
+        );
+
+        console.log(
+            "════════════════════════════════════════════"
+        );
+
+        return;
+    }
+
+    // --------------------------------------------------------
+    // 📦 REGISTRY
+    // --------------------------------------------------------
+
+    const oakLog =
+        bot.registry.itemsByName.oak_log;
+
+    const oakPlanks =
+        bot.registry.itemsByName.oak_planks;
+
+    const craftingTable =
+        bot.registry.itemsByName.crafting_table;
+
+    console.log(
+        "🧪 oak_log:",
+        oakLog
+    );
+
+    console.log(
+        "🧪 oak_planks:",
+        oakPlanks
+    );
+
+    console.log(
+        "🧪 crafting_table:",
+        craftingTable
+    );
+
+    // --------------------------------------------------------
+    // 🌳 OAK LOG
+    // --------------------------------------------------------
+
+    if (oakLog) {
+        try {
+            const receitasLog =
+                bot.recipesFor(
+                    oakLog.id,
+                    null,
+                    1,
+                    null
+                );
+
+            console.log(
+                `🧪 oak_log → ${receitasLog.length} receita(s)`
+            );
+
+            receitasLog.forEach(
+                (receita, index) => {
+                    console.log(
+                        `🧪 Receita oak_log #${index + 1}:`,
+                        {
+                            requiresTable:
+                                receita.requiresTable,
+
+                            result:
+                                receita.result,
+
+                            delta:
+                                receita.delta,
+
+                            ingredients:
+                                receita.ingredients
+                        }
+                    );
+                }
+            );
+        } catch (erro) {
+            console.error(
+                "❌ Erro testando receita de oak_log:",
+                erro
+            );
+        }
+    } else {
+        console.warn(
+            "⚠️ oak_log não existe no registry."
+        );
+    }
+
+    // --------------------------------------------------------
+    // 🪵 OAK PLANKS
+    // --------------------------------------------------------
+
+    if (!oakPlanks) {
+        console.error(
+            "❌ oak_planks NÃO existe no registry."
+        );
+    } else {
+        try {
+            const receitasPlanks =
+                bot.recipesFor(
+                    oakPlanks.id,
+                    null,
+                    1,
+                    null
+                );
+
+            console.log(
+                `🧪 oak_planks → ${receitasPlanks.length} receita(s)`
+            );
+
+            receitasPlanks.forEach(
+                (receita, index) => {
+                    console.log(
+                        `🧪 Receita oak_planks #${index + 1}:`,
+                        {
+                            requiresTable:
+                                receita.requiresTable,
+
+                            result:
+                                receita.result,
+
+                            delta:
+                                receita.delta,
+
+                            ingredients:
+                                receita.ingredients
+                        }
+                    );
+                }
+            );
+
+            if (receitasPlanks.length === 0) {
+                console.error("");
+                console.error(
+                    "❌ PROBLEMA CONFIRMADO:"
+                );
+                console.error(
+                    "❌ oak_planks existe no registry,"
+                );
+                console.error(
+                    "❌ mas bot.recipesFor() retornou ZERO receitas."
+                );
+                console.error("");
+            }
+        } catch (erro) {
+            console.error(
+                "❌ Erro testando receita de oak_planks:",
+                erro
+            );
+        }
+    }
+
+    // --------------------------------------------------------
+    // 🪑 CRAFTING TABLE
+    // --------------------------------------------------------
+
+    if (craftingTable) {
+        console.log(
+            "🧪 crafting_table ID:",
+            craftingTable.id
+        );
+    } else {
+        console.warn(
+            "⚠️ crafting_table não existe no registry."
+        );
+    }
+
+    // --------------------------------------------------------
+    // 📚 INFORMAÇÕES DO REGISTRY
+    // --------------------------------------------------------
+
+    try {
+        console.log(
+            "🧪 Número de itens no registry:",
+            Object.keys(
+                bot.registry.itemsByName || {}
+            ).length
+        );
+
+        console.log(
+            "🧪 Número de blocos no registry:",
+            Object.keys(
+                bot.registry.blocksByName || {}
+            ).length
+        );
+    } catch (erro) {
+        console.warn(
+            "⚠️ Não foi possível contar registry:",
+            erro.message
+        );
+    }
+
+    console.log(
+        "════════════════════════════════════════════"
+    );
+    console.log("");
+}
 
 function criarEstado() {
     const estadoPercepcao =
         percepcao &&
-        typeof percepcao.obterEstado ===
-            "function"
+        typeof percepcao.obterEstado === "function"
             ? percepcao.obterEstado()
             : {};
 
@@ -144,57 +365,49 @@ function criarEstado() {
 
         movimento:
             movimento &&
-            typeof movimento.obterEstado ===
-                "function"
+            typeof movimento.obterEstado === "function"
                 ? movimento.obterEstado()
                 : null,
 
         inventario:
             inventario &&
-            typeof inventario.obterEstado ===
-                "function"
+            typeof inventario.obterEstado === "function"
                 ? inventario.obterEstado()
                 : null,
 
         navegacao:
             navegacao &&
-            typeof navegacao.obterEstado ===
-                "function"
+            typeof navegacao.obterEstado === "function"
                 ? navegacao.obterEstado()
                 : null,
 
         combate:
             combate &&
-            typeof combate.obterEstado ===
-                "function"
+            typeof combate.obterEstado === "function"
                 ? combate.obterEstado()
                 : null,
 
         seguranca:
             seguranca &&
-            typeof seguranca.obterEstado ===
-                "function"
+            typeof seguranca.obterEstado === "function"
                 ? seguranca.obterEstado()
                 : null,
 
         crafting:
             crafting &&
-            typeof crafting.obterEstado ===
-                "function"
+            typeof crafting.obterEstado === "function"
                 ? crafting.obterEstado()
                 : null,
 
         construcao:
             construcao &&
-            typeof construcao.obterEstado ===
-                "function"
+            typeof construcao.obterEstado === "function"
                 ? construcao.obterEstado()
                 : null,
 
         autonomia:
             autonomia &&
-            typeof autonomia.obterEstado ===
-                "function"
+            typeof autonomia.obterEstado === "function"
                 ? autonomia.obterEstado()
                 : null,
 
@@ -209,36 +422,22 @@ function criarEstado() {
     };
 }
 
-
 // ============================================================
 // 🎮 RESULTADO DE AÇÃO
 // ============================================================
-//
-// O acao_id agora é propagado de volta para a API.
-//
-// Antes:
-//     registrarResultadoAcao(acao, parametros, resultado)
-//
-// Agora:
-//     registrarResultadoAcao(acao, acaoId, parametros, resultado)
-//
-// E o payload enviado para a Raiden inclui:
-//
-//     "acao_id": acaoId
-//
-// Isso permite que a API associe o resultado
-// à ação pendente correta.
 
 function registrarResultadoAcao(
     acao,
     acaoId,
     parametros,
-    resultado
+    resultado,
+    origem = "api"
 ) {
     estadoBot.ultimaAcao = {
         acao,
         acaoId,
         parametros,
+        origem,
         timestamp: agora()
     };
 
@@ -246,20 +445,20 @@ function registrarResultadoAcao(
         acao,
         acaoId,
         resultado,
+        origem,
         timestamp: agora()
     };
 
     enviarMensagemRaiden({
-        tipo:
-            "minecraft_acao_resultado",
+        tipo: "minecraft_acao_resultado",
 
         acao,
 
-        acao_id:
-            acaoId,
+        acao_id: acaoId,
 
-        sucesso:
-            !!resultado?.sucesso,
+        origem,
+
+        sucesso: !!resultado?.sucesso,
 
         resultado,
 
@@ -267,32 +466,33 @@ function registrarResultadoAcao(
     });
 }
 
-
 // ============================================================
 // 🎮 EXECUTAR AÇÃO
 // ============================================================
-//
-// Antes:
-//     executarAcao(acao, parametros = {})
-//
-// Agora:
-//     executarAcao(acao, acaoId = null, parametros = {})
-//
-// O acaoId é opcional. Quando vier da API,
-// é propagado para registrarResultadoAcao().
 
 async function executarAcao(
     acao,
     acaoId = null,
-    parametros = {}
+    parametros = {},
+    origem = "api"
 ) {
     if (!acoes) {
-        return {
+        const resultado = {
             sucesso: false,
             acao,
             erro:
                 "Sistema de ações ainda não inicializado."
         };
+
+        registrarResultadoAcao(
+            acao,
+            acaoId,
+            parametros,
+            resultado,
+            origem
+        );
+
+        return resultado;
     }
 
     try {
@@ -306,11 +506,11 @@ async function executarAcao(
             acao,
             acaoId,
             parametros,
-            resultado
+            resultado,
+            origem
         );
 
         return resultado;
-
     } catch (erro) {
         const resultado = {
             sucesso: false,
@@ -324,17 +524,145 @@ async function executarAcao(
             acao,
             acaoId,
             parametros,
-            resultado
+            resultado,
+            origem
         );
 
         return resultado;
     }
 }
 
+// ============================================================
+// 🧠 CONTROLE DA AUTONOMIA
+// ============================================================
 
-function processarMensagemRaiden(
-    mensagem
+async function processarControleAutonomia(
+    acao,
+    acaoId,
+    parametros
 ) {
+    if (!autonomia) {
+        const resultado = {
+            sucesso: false,
+            acao,
+            erro: "Módulo de autonomia indisponível."
+        };
+
+        registrarResultadoAcao(
+            acao,
+            acaoId,
+            parametros,
+            resultado,
+            "api"
+        );
+
+        return resultado;
+    }
+
+    let resultado;
+
+    try {
+        switch (acao) {
+            case "definir_objetivo": {
+                const definiu =
+                    autonomia.definirObjetivo({
+                        id: parametros.id,
+                        nome: parametros.nome,
+                        descricao: parametros.descricao,
+                        etapa: parametros.etapa,
+                        etapas: parametros.etapas
+                    });
+
+                resultado = {
+                    sucesso: !!definiu,
+                    acao,
+                    erro: definiu
+                        ? null
+                        : "Objetivo inválido."
+                };
+
+                break;
+            }
+
+            case "iniciar_autonomia": {
+                const iniciou = autonomia.iniciar();
+
+                resultado = {
+                    sucesso: !!iniciou,
+                    acao,
+                    erro: iniciou
+                        ? null
+                        : "Falha ao iniciar autonomia."
+                };
+
+                break;
+            }
+
+            case "parar_autonomia": {
+                const parou = autonomia.parar(
+                    parametros.motivo || "api"
+                );
+
+                resultado = {
+                    sucesso: !!parou,
+                    acao
+                };
+
+                break;
+            }
+
+            case "reiniciar_autonomia": {
+                const reiniciou = autonomia.reiniciar();
+
+                resultado = {
+                    sucesso: !!reiniciou,
+                    acao,
+                    erro: reiniciou
+                        ? null
+                        : "Falha ao reiniciar autonomia."
+                };
+
+                break;
+            }
+
+            default: {
+                resultado = {
+                    sucesso: false,
+                    acao,
+                    erro: `Ação de controle desconhecida: ${acao}`
+                };
+            }
+        }
+    } catch (erro) {
+        resultado = {
+            sucesso: false,
+            acao,
+            erro: erro?.message || String(erro)
+        };
+    }
+
+    registrarResultadoAcao(
+        acao,
+        acaoId,
+        parametros,
+        resultado,
+        "api"
+    );
+
+    if (
+        resultado.sucesso &&
+        typeof autonomia.obterEstado === "function"
+    ) {
+        enviarEvento(
+            "minecraft_autonomia_estado",
+            autonomia.obterEstado()
+        );
+    }
+
+    return resultado;
+}
+
+function processarMensagemRaiden(mensagem) {
     if (
         !mensagem ||
         typeof mensagem !== "object"
@@ -350,65 +678,57 @@ function processarMensagemRaiden(
             });
             break;
 
-
         case "estado_solicitar":
             if (conexao) {
                 conexao.enviarEstado();
             }
             break;
 
+        case "minecraft_acao": {
+            const acao = String(
+                mensagem.acao || ""
+            )
+                .trim()
+                .toLowerCase();
 
-        // ====================================================
-        // 🎮 AÇÃO
-        // ====================================================
-        //
-        // Antes:
-        //     executarAcao(
-        //         mensagem.acao,
-        //         mensagem.parametros || {}
-        //     );
-        //
-        // Agora:
-        //     executarAcao(
-        //         mensagem.acao,
-        //         mensagem.acao_id || null,
-        //         mensagem.parametros || {}
-        //     );
-        //
-        // O acao_id é obrigatório para o ciclo
-        // de autonomia funcionar. Sem ele, a ação
-        // pendente nunca é liberada.
+            const controlesAutonomia = new Set([
+                "definir_objetivo",
+                "iniciar_autonomia",
+                "parar_autonomia",
+                "reiniciar_autonomia"
+            ]);
 
-        case "minecraft_acao":
+            if (controlesAutonomia.has(acao)) {
+                processarControleAutonomia(
+                    acao,
+                    mensagem.acao_id || null,
+                    mensagem.parametros || {}
+                );
+                break;
+            }
+
             executarAcao(
                 mensagem.acao,
                 mensagem.acao_id || null,
-                mensagem.parametros || {}
+                mensagem.parametros || {},
+                "api"
             );
+
             break;
-
-
-        // ====================================================
-        // 🛑 CANCELAR AÇÃO
-        // ====================================================
-        //
-        // Cancelamento é uma ação de emergência,
-        // não entra no ciclo de acao_id.
+        }
 
         case "cancelar_acao":
             executarAcao(
                 "parar",
                 null,
-                {}
+                {},
+                "sistema"
             );
             break;
 
-
         case "parar_tudo":
             if (autonomia) {
-                autonomia.parar(
-                    "parar_tudo"
-                );
+                autonomia.parar("parar_tudo");
             }
 
             if (seguranca) {
@@ -426,38 +746,41 @@ function processarMensagemRaiden(
 
             break;
 
-
         default:
-            // Mensagens desconhecidas são ignoradas.
-            //
-            // IMPORTANTE:
-            // Não enviar ACK aqui.
-            //
-            // Antes, qualquer mensagem não reconhecida
-            // gerava outro "ack", podendo criar um loop
-            // de mensagens entre o bot e a API.
             break;
     }
 }
 
+// ============================================================
+// 🧠 FUNÇÃO PÚBLICA PARA A AUTONOMIA
+// ============================================================
+
+async function executarAcaoDaAutonomia(
+    acao,
+    parametros = {}
+) {
+    return executarAcao(
+        acao,
+        null,
+        parametros,
+        "autonomia"
+    );
+}
 
 const contexto = {
     bot,
 
-    config:
-        MINECRAFT_CONFIG,
+    config: MINECRAFT_CONFIG,
 
-    estado:
-        estadoBot,
+    estado: estadoBot,
 
-    enviarMensagem:
-        enviarMensagemRaiden,
+    enviarMensagem: enviarMensagemRaiden,
 
     enviarEvento,
 
     criarEstado,
 
-    chat,
+    executarAcaoPublica: executarAcaoDaAutonomia,
 
     percepcao: null,
     movimento: null,
@@ -474,135 +797,54 @@ const contexto = {
     conexao: null
 };
 
+percepcao = criarPercepcao(contexto);
+contexto.percepcao = percepcao;
 
-percepcao =
-    criarPercepcao(
-        contexto
-    );
+movimento = criarMovimento(contexto);
+contexto.movimento = movimento;
 
-contexto.percepcao =
-    percepcao;
+inventario = criarInventario(contexto);
+contexto.inventario = inventario;
 
+mundo = criarMundo(contexto);
+contexto.mundo = mundo;
 
-movimento =
-    criarMovimento(
-        contexto
-    );
+navegacao = criarNavegacao(contexto);
+contexto.navegacao = navegacao;
 
-contexto.movimento =
-    movimento;
+combate = criarCombate(contexto);
+contexto.combate = combate;
 
+seguranca = criarSeguranca(contexto);
+contexto.seguranca = seguranca;
 
-inventario =
-    criarInventario(
-        contexto
-    );
+crafting = criarCrafting(contexto);
+contexto.crafting = crafting;
 
-contexto.inventario =
-    inventario;
+construcao = criarConstrucao(contexto);
+contexto.construcao = construcao;
 
+autonomia = criarAutonomia(contexto);
+contexto.autonomia = autonomia;
 
-mundo =
-    criarMundo(
-        contexto
-    );
+acoes = criarAcoes(contexto);
+contexto.acoes = acoes;
 
-contexto.mundo =
-    mundo;
+eventos = criarEventos(contexto);
+contexto.eventos = eventos;
 
-
-navegacao =
-    criarNavegacao(
-        contexto
-    );
-
-contexto.navegacao =
-    navegacao;
-
-
-combate =
-    criarCombate(
-        contexto
-    );
-
-contexto.combate =
-    combate;
-
-
-seguranca =
-    criarSeguranca(
-        contexto
-    );
-
-contexto.seguranca =
-    seguranca;
-
-
-crafting =
-    criarCrafting(
-        contexto
-    );
-
-contexto.crafting =
-    crafting;
-
-
-construcao =
-    criarConstrucao(
-        contexto
-    );
-
-contexto.construcao =
-    construcao;
-
-
-autonomia =
-    criarAutonomia(
-        contexto
-    );
-
-contexto.autonomia =
-    autonomia;
-
-
-acoes =
-    criarAcoes(
-        contexto
-    );
-
-contexto.acoes =
-    acoes;
-
-
-eventos =
-    criarEventos(
-        contexto
-    );
-
-contexto.eventos =
-    eventos;
-
-
-conexao =
-    criarConexao(
-        contexto
-    );
-
-contexto.conexao =
-    conexao;
-
+conexao = criarConexao(contexto);
+contexto.conexao = conexao;
 
 conexao.definirCallback(
     "mensagem",
     processarMensagemRaiden
 );
 
-
 conexao.definirCallback(
     "aberta",
     () => {
-        estadoBot.conectadoRaiden =
-            true;
+        estadoBot.conectadoRaiden = true;
 
         console.log(
             "🧠 Conectado ao cérebro da Raiden!"
@@ -616,19 +858,16 @@ conexao.definirCallback(
     }
 );
 
-
 conexao.definirCallback(
     "fechada",
     () => {
-        estadoBot.conectadoRaiden =
-            false;
+        estadoBot.conectadoRaiden = false;
 
         console.log(
             "🔌 Conexão com a API da Raiden encerrada."
         );
     }
 );
-
 
 conexao.definirCallback(
     "erro",
@@ -640,17 +879,14 @@ conexao.definirCallback(
     }
 );
 
-
 eventos.registrar();
 
 navegacao.registrarEventos();
 
-
 bot.once(
     "spawn",
     () => {
-        estadoBot.conectadoMinecraft =
-            true;
+        estadoBot.conectadoMinecraft = true;
 
         console.log(
             "⛏️ RAÍDEN ENTROU NO MINECRAFT!"
@@ -659,43 +895,40 @@ bot.once(
         console.log(
             "📍 Posição inicial:",
             {
-                x:
-                    bot.entity.position.x,
-
-                y:
-                    bot.entity.position.y,
-
-                z:
-                    bot.entity.position.z
+                x: bot.entity.position.x,
+                y: bot.entity.position.y,
+                z: bot.entity.position.z
             }
         );
 
+        // ====================================================
+        // 🧪 DIAGNÓSTICO TEMPORÁRIO
+        // ====================================================
+        //
+        // Executa depois do spawn, quando o registry,
+        // versão e dados do Minecraft já estão disponíveis.
+        //
 
-        if (
-            !estadoBot.viewerIniciado
-        ) {
+        diagnosticarReceitasMinecraft();
+
+        if (!estadoBot.viewerIniciado) {
             try {
                 viewer(
                     bot,
                     {
-                        port:
-                            VIEWER_CONFIG.porta,
-
+                        port: VIEWER_CONFIG.porta,
                         firstPerson:
                             VIEWER_CONFIG.primeiraPessoa,
-
                         viewDistance:
                             VIEWER_CONFIG.distanciaVisao
                     }
                 );
 
-                estadoBot.viewerIniciado =
-                    true;
+                estadoBot.viewerIniciado = true;
 
                 console.log(
                     `👁️ Viewer iniciado em http://127.0.0.1:${VIEWER_CONFIG.porta}`
                 );
-
             } catch (erro) {
                 console.error(
                     "❌ Erro ao iniciar viewer:",
@@ -704,14 +937,12 @@ bot.once(
             }
         }
 
-
         try {
             navegacao.inicializar();
 
             console.log(
                 "🧭 Navegação inicializada."
             );
-
         } catch (erro) {
             console.error(
                 "❌ Erro ao inicializar navegação:",
@@ -719,33 +950,26 @@ bot.once(
             );
         }
 
+        console.log(
+            "🧠 Autonomia em modo passivo. " +
+            "Aguardando ordem da API para iniciar."
+        );
 
-        try {
-            autonomia.iniciar();
-
-            console.log(
-                "🧠 Autonomia da Raiden iniciada."
-            );
-
-        } catch (erro) {
-            console.error(
-                "❌ Erro ao iniciar autonomia:",
-                erro.message
-            );
+        if (
+            typeof conexao.reabilitarReconexao ===
+            "function"
+        ) {
+            conexao.reabilitarReconexao();
         }
-
 
         conexao.conectar();
     }
 );
 
-
 bot.on(
     "physicsTick",
     () => {
-        if (
-            !estadoBot.conectadoMinecraft
-        ) {
+        if (!estadoBot.conectadoMinecraft) {
             return;
         }
 
@@ -754,15 +978,11 @@ bot.on(
     }
 );
 
-
 bot.on(
     "end",
     () => {
-        estadoBot.conectadoMinecraft =
-            false;
-
-        estadoBot.conectadoRaiden =
-            false;
+        estadoBot.conectadoMinecraft = false;
+        estadoBot.conectadoRaiden = false;
 
         try {
             autonomia.parar(
@@ -792,7 +1012,6 @@ bot.on(
     }
 );
 
-
 bot.on(
     "error",
     erro => {
@@ -803,16 +1022,13 @@ bot.on(
     }
 );
 
-
 function desligar() {
     console.log(
         "\n🛑 Encerrando Raiden Minecraft..."
     );
 
     try {
-        autonomia.parar(
-            "desligamento"
-        );
+        autonomia.parar("desligamento");
     } catch (_) {}
 
     try {
@@ -828,25 +1044,14 @@ function desligar() {
     } catch (_) {}
 
     try {
-        bot.quit(
-            "Raiden encerrando."
-        );
+        bot.quit("Raiden encerrando.");
     } catch (_) {
         process.exit(0);
     }
 }
 
-
-process.once(
-    "SIGINT",
-    desligar
-);
-
-process.once(
-    "SIGTERM",
-    desligar
-);
-
+process.once("SIGINT", desligar);
+process.once("SIGTERM", desligar);
 
 module.exports = {
     bot,

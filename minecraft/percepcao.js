@@ -48,9 +48,18 @@ function criarPercepcao(contexto) {
         "warden"
     ]);
 
+    /*
+     * Tipos de entidade que NÃO são úteis para
+     * decisão. Filtramos em obterEntidadesProximas.
+     */
+    const TIPOS_IGNORADOS = new Set([
+        "object",   // itens dropados, flechas, barcos, etc.
+        "other",    // xp orbs, etc.
+        "orb"       // xp orbs (algumas versões)
+    ]);
+
     function numero(valor, padrao = 0) {
-        const resultado =
-            Number(valor);
+        const resultado = Number(valor);
 
         return Number.isFinite(resultado)
             ? resultado
@@ -74,8 +83,7 @@ function criarPercepcao(contexto) {
     }
 
     function obterPosicao() {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return null;
@@ -90,32 +98,20 @@ function criarPercepcao(contexto) {
 
     function obterRotacao() {
         if (!bot.entity) {
-            return {
-                yaw: 0,
-                pitch: 0
-            };
+            return { yaw: 0, pitch: 0 };
         }
 
         return {
-            yaw: numero(
-                bot.entity.yaw
-            ),
-            pitch: numero(
-                bot.entity.pitch
-            )
+            yaw: numero(bot.entity.yaw),
+            pitch: numero(bot.entity.pitch)
         };
     }
 
     function obterVelocidade() {
-        const velocidade =
-            bot.entity?.velocity;
+        const velocidade = bot.entity?.velocity;
 
         if (!velocidade) {
-            return {
-                x: 0,
-                y: 0,
-                z: 0
-            };
+            return { x: 0, y: 0, z: 0 };
         }
 
         return {
@@ -126,8 +122,7 @@ function criarPercepcao(contexto) {
     }
 
     function obterItemNaMao() {
-        const item =
-            bot.heldItem;
+        const item = bot.heldItem;
 
         if (!item) {
             return null;
@@ -137,14 +132,10 @@ function criarPercepcao(contexto) {
             slot: item.slot,
             id: item.type,
             nome: item.name,
-            displayName:
-                item.displayName,
-            quantidade:
-                item.count,
-            durabilidade:
-                item.durabilityUsed,
-            durabilidadeMaxima:
-                item.maxDurability
+            displayName: item.displayName,
+            quantidade: item.count,
+            durabilidade: item.durabilityUsed,
+            durabilidadeMaxima: item.maxDurability
         };
     }
 
@@ -159,31 +150,23 @@ function criarPercepcao(contexto) {
                 slot: item.slot,
                 id: item.type,
                 nome: item.name,
-                displayName:
-                    item.displayName,
-                quantidade:
-                    item.count,
-                durabilidade:
-                    item.durabilityUsed,
-                durabilidadeMaxima:
-                    item.maxDurability
+                displayName: item.displayName,
+                quantidade: item.count,
+                durabilidade: item.durabilityUsed,
+                durabilidadeMaxima: item.maxDurability
             }));
     }
 
     function obterEntidadesProximas(
-        distanciaMaxima =
-            CONFIG.distanciaEntidades
+        distanciaMaxima = CONFIG.distanciaEntidades
     ) {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return [];
         }
 
-        return Object.values(
-            bot.entities || {}
-        )
+        return Object.values(bot.entities || {})
             .filter(entidade => {
                 if (
                     !entidade ||
@@ -193,122 +176,87 @@ function criarPercepcao(contexto) {
                     return false;
                 }
 
+                /*
+                 * Filtra itens dropados, flechas, xp orbs.
+                 * Esses não ajudam a IA a decidir.
+                 */
+                const tipo = String(
+                    entidade.type || ""
+                ).toLowerCase();
+
+                if (TIPOS_IGNORADOS.has(tipo)) {
+                    return false;
+                }
+
                 return (
-                    distancia(
-                        posicao,
-                        entidade.position
-                    ) <=
+                    distancia(posicao, entidade.position) <=
                     distanciaMaxima
                 );
             })
             .map(entidade => {
-                const nome =
-                    String(
-                        entidade.name ||
+                const nome = String(
+                    entidade.name ||
                         entidade.displayName ||
                         ""
-                    ).toLowerCase();
+                ).toLowerCase();
 
-                const ehJogador =
-                    entidade.type ===
-                    "player";
+                const ehJogador = entidade.type === "player";
 
                 return {
                     id: entidade.id,
                     tipo: entidade.type,
-                    nome:
-                        entidade.name ||
-                        null,
-                    displayName:
-                        entidade.displayName ||
-                        null,
-                    distancia:
-                        Number(
-                            distancia(
-                                posicao,
-                                entidade.position
-                            ).toFixed(2)
-                        ),
+                    nome: entidade.name || null,
+                    displayName: entidade.displayName || null,
+                    distancia: Number(
+                        distancia(
+                            posicao,
+                            entidade.position
+                        ).toFixed(2)
+                    ),
                     posicao: {
-                        x: numero(
-                            entidade.position.x
-                        ),
-                        y: numero(
-                            entidade.position.y
-                        ),
-                        z: numero(
-                            entidade.position.z
-                        )
+                        x: numero(entidade.position.x),
+                        y: numero(entidade.position.y),
+                        z: numero(entidade.position.z)
                     },
-                    vida:
-                        entidade.health ??
-                        null,
-                    fome:
-                        entidade.food ??
-                        null,
-                    jogador:
-                        ehJogador,
-                    hostil:
-                        HOSTIS.has(nome)
+                    vida: entidade.health ?? null,
+                    fome: entidade.food ?? null,
+                    jogador: ehJogador,
+                    hostil: HOSTIS.has(nome)
                 };
             })
-            .sort(
-                (a, b) =>
-                    a.distancia -
-                    b.distancia
-            )
-            .slice(
-                0,
-                CONFIG.quantidadeMaximaEntidades
-            );
+            .sort((a, b) => a.distancia - b.distancia)
+            .slice(0, CONFIG.quantidadeMaximaEntidades);
     }
 
     function obterJogadoresProximos(
-        distanciaMaxima =
-            CONFIG.distanciaEntidades
+        distanciaMaxima = CONFIG.distanciaEntidades
     ) {
-        return obterEntidadesProximas(
-            distanciaMaxima
-        ).filter(
-            entidade =>
-                entidade.jogador
-        );
+        return obterEntidadesProximas(distanciaMaxima)
+            .filter(entidade => entidade.jogador);
     }
 
     function obterInimigosProximos(
-        distanciaMaxima =
-            CONFIG.distanciaEntidades
+        distanciaMaxima = CONFIG.distanciaEntidades
     ) {
-        return obterEntidadesProximas(
-            distanciaMaxima
-        ).filter(
-            entidade =>
-                entidade.hostil
-        );
+        return obterEntidadesProximas(distanciaMaxima)
+            .filter(entidade => entidade.hostil);
     }
 
     function obterBloco(x, y, z) {
         if (
-            !Number.isFinite(
-                Number(x)
-            ) ||
-            !Number.isFinite(
-                Number(y)
-            ) ||
-            !Number.isFinite(
-                Number(z)
-            )
+            !Number.isFinite(Number(x)) ||
+            !Number.isFinite(Number(y)) ||
+            !Number.isFinite(Number(z))
         ) {
             return null;
         }
 
         try {
-            const bloco =
-                bot.blockAt({
-                    x: Math.floor(x),
-                    y: Math.floor(y),
-                    z: Math.floor(z)
-                });
+            const bloco = bot.blockAt({
+                x: Math.floor(x),
+                y: Math.floor(y),
+                z: Math.floor(z)
+            });
 
             if (!bloco) {
                 return null;
@@ -316,35 +264,24 @@ function criarPercepcao(contexto) {
 
             return {
                 nome: bloco.name,
-                displayName:
-                    bloco.displayName,
+                displayName: bloco.displayName,
                 id: bloco.type,
                 posicao: {
                     x: bloco.position.x,
                     y: bloco.position.y,
                     z: bloco.position.z
                 },
-                solido:
-                    bloco.boundingBox ===
-                    "block",
-                transparente:
-                    bloco.transparent === true,
-                colidivel:
-                    bloco.boundingBox !==
-                    "empty",
-                quebravel:
-                    bloco.diggable !== false
+                solido: bloco.boundingBox === "block",
+                transparente: bloco.transparent === true,
+                colidivel: bloco.boundingBox !== "empty",
+                quebravel: bloco.diggable !== false
             };
         } catch (_) {
             return null;
         }
     }
 
-    function obterBlocoCompleto(
-        x,
-        y,
-        z
-    ) {
+    function obterBlocoCompleto(x, y, z) {
         try {
             return bot.blockAt({
                 x: Math.floor(x),
@@ -357,8 +294,7 @@ function criarPercepcao(contexto) {
     }
 
     function obterBlocoSob() {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return null;
@@ -372,30 +308,15 @@ function criarPercepcao(contexto) {
     }
 
     function obterBlocoFrente() {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
+        const yaw = bot.entity?.yaw;
 
-        const yaw =
-            bot.entity?.yaw;
-
-        if (
-            !posicao ||
-            !Number.isFinite(yaw)
-        ) {
+        if (!posicao || !Number.isFinite(yaw)) {
             return null;
         }
 
-        const x =
-            Math.floor(
-                posicao.x -
-                Math.sin(yaw)
-            );
-
-        const z =
-            Math.floor(
-                posicao.z -
-                Math.cos(yaw)
-            );
+        const x = Math.floor(posicao.x - Math.sin(yaw));
+        const z = Math.floor(posicao.z - Math.cos(yaw));
 
         return obterBloco(
             x,
@@ -405,30 +326,15 @@ function criarPercepcao(contexto) {
     }
 
     function obterBlocoEsquerda() {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
+        const yaw = bot.entity?.yaw;
 
-        const yaw =
-            bot.entity?.yaw;
-
-        if (
-            !posicao ||
-            !Number.isFinite(yaw)
-        ) {
+        if (!posicao || !Number.isFinite(yaw)) {
             return null;
         }
 
-        const x =
-            Math.floor(
-                posicao.x -
-                Math.cos(yaw)
-            );
-
-        const z =
-            Math.floor(
-                posicao.z +
-                Math.sin(yaw)
-            );
+        const x = Math.floor(posicao.x - Math.cos(yaw));
+        const z = Math.floor(posicao.z + Math.sin(yaw));
 
         return obterBloco(
             x,
@@ -438,30 +344,15 @@ function criarPercepcao(contexto) {
     }
 
     function obterBlocoDireita() {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
+        const yaw = bot.entity?.yaw;
 
-        const yaw =
-            bot.entity?.yaw;
-
-        if (
-            !posicao ||
-            !Number.isFinite(yaw)
-        ) {
+        if (!posicao || !Number.isFinite(yaw)) {
             return null;
         }
 
-        const x =
-            Math.floor(
-                posicao.x +
-                Math.cos(yaw)
-            );
-
-        const z =
-            Math.floor(
-                posicao.z -
-                Math.sin(yaw)
-            );
+        const x = Math.floor(posicao.x + Math.cos(yaw));
+        const z = Math.floor(posicao.z - Math.sin(yaw));
 
         return obterBloco(
             x,
@@ -471,298 +362,229 @@ function criarPercepcao(contexto) {
     }
 
     function obterAmbiente() {
-        const posicao =
-            obterPosicao();
+        const posicao = obterPosicao();
 
         return {
-            tempo:
-                bot.time?.time ?? null,
-
-            hora:
-                bot.time?.timeOfDay ??
-                null,
-
-            dia:
-                bot.time?.day ??
-                null,
-
-            chuva:
-                bot.isRaining === true,
-
-            trovao:
-                bot.thunderState > 0,
-
-            dificuldade:
-                bot.game?.difficulty ??
-                null,
-
-            modoJogo:
-                bot.game?.gameMode ??
-                null,
-
-            nomeMundo:
-                bot.game?.levelType ??
-                null,
-
+            tempo: bot.time?.time ?? null,
+            hora: bot.time?.timeOfDay ?? null,
+            dia: bot.time?.day ?? null,
+            chuva: bot.isRaining === true,
+            trovao: bot.thunderState > 0,
+            dificuldade: bot.game?.difficulty ?? null,
+            modoJogo: bot.game?.gameMode ?? null,
+            nomeMundo: bot.game?.levelType ?? null,
             posicao
         };
     }
 
+    /*
+     * Blocos adjacentes nos eixos cardeais do MUNDO,
+     * não relativos à rotação da Raiden.
+     *
+     * Use obterBlocoFrente/Esquerda/Direita para
+     * posições relativas à Raiden.
+     */
     function obterAmbienteProximo() {
         const blocos = {};
-
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return blocos;
         }
 
-        const x =
-            Math.floor(posicao.x);
-
-        const y =
-            Math.floor(posicao.y);
-
-        const z =
-            Math.floor(posicao.z);
+        const x = Math.floor(posicao.x);
+        const y = Math.floor(posicao.y);
+        const z = Math.floor(posicao.z);
 
         const offsets = {
             centro: [0, 0, 0],
             baixo: [0, -1, 0],
             cima: [0, 1, 0],
-            frente: [0, 0, 1],
-            tras: [0, 0, -1],
-            esquerda: [-1, 0, 0],
-            direita: [1, 0, 0]
+            norte: [0, 0, -1],
+            sul: [0, 0, 1],
+            oeste: [-1, 0, 0],
+            leste: [1, 0, 0]
         };
 
-        for (
-            const [nome, offset]
-            of Object.entries(offsets)
-        ) {
-            blocos[nome] =
-                obterBloco(
-                    x + offset[0],
-                    y + offset[1],
-                    z + offset[2]
-                );
+        for (const [nome, offset] of Object.entries(offsets)) {
+            blocos[nome] = obterBloco(
+                x + offset[0],
+                y + offset[1],
+                z + offset[2]
+            );
         }
 
         return blocos;
     }
 
+    /*
+     * Usa bot.findBlocks() em vez de loop cúbico.
+     */
     function encontrarBlocos(
         nome,
         distanciaMaxima = 8,
         limite = 20
     ) {
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return [];
         }
 
-        const distanciaLimitada =
-            Math.max(
-                1,
-                Math.min(
-                    Math.floor(
-                        distanciaMaxima
-                    ),
-                    16
-                )
-            );
+        const alvo = String(nome || "")
+            .trim()
+            .toLowerCase();
 
-        const resultados = [];
-        const alvo =
-            String(
-                nome || ""
-            ).toLowerCase();
-
-        const origemX =
-            Math.floor(posicao.x);
-
-        const origemY =
-            Math.floor(posicao.y);
-
-        const origemZ =
-            Math.floor(posicao.z);
-
-        for (
-            let x =
-                origemX -
-                distanciaLimitada;
-            x <=
-                origemX +
-                distanciaLimitada;
-            x++
-        ) {
-            for (
-                let y =
-                    origemY -
-                    distanciaLimitada;
-                y <=
-                    origemY +
-                    distanciaLimitada;
-                y++
-            ) {
-                for (
-                    let z =
-                        origemZ -
-                        distanciaLimitada;
-                    z <=
-                        origemZ +
-                        distanciaLimitada;
-                    z++
-                ) {
-                    const bloco =
-                        obterBlocoCompleto(
-                            x,
-                            y,
-                            z
-                        );
-
-                    if (
-                        !bloco ||
-                        bloco.name
-                            ?.toLowerCase() !==
-                            alvo
-                    ) {
-                        continue;
-                    }
-
-                    resultados.push({
-                        nome: bloco.name,
-                        displayName:
-                            bloco.displayName,
-                        id: bloco.type,
-                        posicao: {
-                            x,
-                            y,
-                            z
-                        },
-                        distancia:
-                            Number(
-                                distancia(
-                                    posicao,
-                                    {
-                                        x,
-                                        y,
-                                        z
-                                    }
-                                ).toFixed(2)
-                            )
-                    });
-
-                    if (
-                        resultados.length >=
-                        limite
-                    ) {
-                        return resultados;
-                    }
-                }
-            }
+        if (!alvo) {
+            return [];
         }
 
-        return resultados.sort(
-            (a, b) =>
-                a.distancia -
-                b.distancia
+        const distanciaLimitada = Math.max(
+            1,
+            Math.min(
+                Math.floor(distanciaMaxima),
+                16
+            )
         );
+
+        const limiteNumerico = Math.max(
+            1,
+            Math.floor(limite)
+        );
+
+        const idAlvo =
+            bot.registry?.blocksByName?.[alvo]?.id;
+
+        if (idAlvo === undefined) {
+            return [];
+        }
+
+        let posicoes = [];
+
+        try {
+            posicoes = bot.findBlocks({
+                matching: idAlvo,
+                maxDistance: distanciaLimitada,
+                count: limiteNumerico
+            });
+        } catch (_) {
+            return [];
+        }
+
+        if (!Array.isArray(posicoes)) {
+            return [];
+        }
+
+        return posicoes
+            .map(pos => {
+                const bloco = bot.blockAt(pos);
+
+                if (!bloco) {
+                    return null;
+                }
+
+                return {
+                    nome: bloco.name,
+                    displayName: bloco.displayName,
+                    id: bloco.type,
+                    posicao: {
+                        x: pos.x,
+                        y: pos.y,
+                        z: pos.z
+                    },
+                    distancia: Number(
+                        distancia(posicao, pos).toFixed(2)
+                    )
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.distancia - b.distancia);
     }
 
+    /*
+     * Perigos = entidades hostis próximas + blocos
+     * perigosos (lava, fogo, magma).
+     *
+     * A autonomia usa esta função como fonte única
+     * de "existePerigo()". Antes, ela só detectava
+     * lava/fogo, ignorando zumbis e esqueletos.
+     */
     function obterPerigos() {
         const perigos = [];
 
-        const posicao =
-            bot.entity?.position;
+        const posicao = bot.entity?.position;
 
         if (!posicao) {
             return perigos;
         }
 
+        /*
+         * 1. Entidades hostis dentro do raio de perigo.
+         */
+        const inimigos = obterInimigosProximos(
+            CONFIG.distanciaPerigos
+        );
+
+        for (const inimigo of inimigos) {
+            perigos.push({
+                tipo: "entidade",
+                nome: inimigo.nome,
+                displayName: inimigo.displayName,
+                id: inimigo.id,
+                posicao: inimigo.posicao,
+                distancia: inimigo.distancia
+            });
+        }
+
+        /*
+         * 2. Blocos perigosos ao redor (lava/fogo/magma).
+         */
         const raio = 3;
 
         for (
-            let x =
-                Math.floor(posicao.x) -
-                raio;
-            x <=
-                Math.floor(posicao.x) +
-                raio;
+            let x = Math.floor(posicao.x) - raio;
+            x <= Math.floor(posicao.x) + raio;
             x++
         ) {
             for (
-                let y =
-                    Math.floor(posicao.y) -
-                    1;
-                y <=
-                    Math.floor(posicao.y) +
-                    2;
+                let y = Math.floor(posicao.y) - 1;
+                y <= Math.floor(posicao.y) + 2;
                 y++
             ) {
                 for (
-                    let z =
-                        Math.floor(posicao.z) -
-                        raio;
-                    z <=
-                        Math.floor(posicao.z) +
-                        raio;
+                    let z = Math.floor(posicao.z) - raio;
+                    z <= Math.floor(posicao.z) + raio;
                     z++
                 ) {
-                    const bloco =
-                        obterBlocoCompleto(
-                            x,
-                            y,
-                            z
-                        );
+                    const bloco = obterBlocoCompleto(x, y, z);
 
                     if (!bloco) {
                         continue;
                     }
 
-                    const nome =
-                        String(
-                            bloco.name || ""
-                        ).toLowerCase();
+                    const nome = String(
+                        bloco.name || ""
+                    ).toLowerCase();
 
                     if (
-                        nome.includes(
-                            "lava"
-                        ) ||
-                        nome ===
-                            "fire" ||
-                        nome ===
-                            "soul_fire" ||
-                        nome ===
-                            "magma_block"
+                        nome.includes("lava") ||
+                        nome === "fire" ||
+                        nome === "soul_fire" ||
+                        nome === "magma_block"
                     ) {
                         perigos.push({
-                            tipo:
-                                nome.includes(
-                                    "lava"
-                                )
-                                    ? "lava"
-                                    : "fogo",
+                            tipo: nome.includes("lava")
+                                ? "lava"
+                                : "fogo",
                             nome,
-                            posicao: {
-                                x,
-                                y,
-                                z
-                            },
-                            distancia:
-                                Number(
-                                    distancia(
-                                        posicao,
-                                        {
-                                            x,
-                                            y,
-                                            z
-                                        }
-                                    ).toFixed(2)
-                                )
+                            posicao: { x, y, z },
+                            distancia: Number(
+                                distancia(posicao, {
+                                    x,
+                                    y,
+                                    z
+                                }).toFixed(2)
+                            )
                         });
                     }
                 }
@@ -770,81 +592,41 @@ function criarPercepcao(contexto) {
         }
 
         return perigos.sort(
-            (a, b) =>
-                a.distancia -
-                b.distancia
+            (a, b) => a.distancia - b.distancia
         );
     }
 
     function obterEstado() {
         return {
-            conectado:
-                bot.player != null,
+            conectado: bot.player != null,
 
-            posicao:
-                obterPosicao(),
+            posicao: obterPosicao(),
+            rotacao: obterRotacao(),
+            velocidade: obterVelocidade(),
 
-            rotacao:
-                obterRotacao(),
-
-            velocidade:
-                obterVelocidade(),
-
-            vida:
-                numero(
-                    bot.health,
-                    20
-                ),
-
-            fome:
-                numero(
-                    bot.food,
-                    20
-                ),
+            vida: numero(bot.health, 20),
+            fome: numero(bot.food, 20),
 
             experiencia: {
-                nivel:
-                    bot.experience?.level ??
-                    0,
-
-                pontos:
-                    bot.experience?.points ??
-                    0,
-
-                progresso:
-                    bot.experience?.progress ??
-                    0
+                nivel: bot.experience?.level ?? 0,
+                pontos: bot.experience?.points ?? 0,
+                progresso: bot.experience?.progress ?? 0
             },
 
-            itemNaMao:
-                obterItemNaMao(),
+            itemNaMao: obterItemNaMao(),
+            inventario: obterInventario(),
 
-            inventario:
-                obterInventario(),
+            entidades: obterEntidadesProximas(),
+            jogadores: obterJogadoresProximos(),
+            inimigos: obterInimigosProximos(),
 
-            entidades:
-                obterEntidadesProximas(),
+            ambiente: obterAmbiente(),
+            ambienteProximo: obterAmbienteProximo(),
 
-            jogadores:
-                obterJogadoresProximos(),
+            perigos: obterPerigos(),
 
-            inimigos:
-                obterInimigosProximos(),
-
-            ambiente:
-                obterAmbiente(),
-
-            ambienteProximo:
-                obterAmbienteProximo(),
-
-            perigos:
-                obterPerigos(),
-
-            blocoSob:
-                obterBlocoSob(),
-
-            blocoFrente:
-                obterBlocoFrente()
+            blocoSob: obterBlocoSob(),
+            blocoFrente: obterBlocoFrente()
         };
     }
 

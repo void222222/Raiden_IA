@@ -17,6 +17,7 @@ function criarNavegacao(contexto) {
     const bot = contexto.bot;
 
     let inicializado = false;
+    let eventosRegistrados = false;
     let navegando = false;
     let destinoAtual = null;
     let seguindo = null;
@@ -45,24 +46,13 @@ function criarNavegacao(contexto) {
                 mcData
             );
 
-            movimentos.canDig =
-                CONFIG.canDig;
+            movimentos.canDig = CONFIG.canDig;
+            movimentos.allow1by1towers = CONFIG.allow1by1towers;
+            movimentos.allowParkour = CONFIG.allowParkour;
+            movimentos.allowSprinting = CONFIG.allowSprinting;
+            movimentos.maxDropDown = CONFIG.maxDropDown;
 
-            movimentos.allow1by1towers =
-                CONFIG.allow1by1towers;
-
-            movimentos.allowParkour =
-                CONFIG.allowParkour;
-
-            movimentos.allowSprinting =
-                CONFIG.allowSprinting;
-
-            movimentos.maxDropDown =
-                CONFIG.maxDropDown;
-
-            bot.pathfinder.setMovements(
-                movimentos
-            );
+            bot.pathfinder.setMovements(movimentos);
 
             inicializado = true;
 
@@ -146,12 +136,7 @@ function criarNavegacao(contexto) {
     }
 
 
-    async function irParaBloco(
-        x,
-        y,
-        z,
-        distancia = 1
-    ) {
+    async function irParaBloco(x, y, z, distancia = 1) {
         if (
             !Number.isFinite(x) ||
             !Number.isFinite(y) ||
@@ -219,8 +204,7 @@ function criarNavegacao(contexto) {
             return bot.entities[identificador] || null;
         }
 
-        const texto = String(identificador)
-            .toLowerCase();
+        const texto = String(identificador).toLowerCase();
 
         return (
             Object.values(bot.entities).find(entidade => {
@@ -235,17 +219,10 @@ function criarNavegacao(contexto) {
     }
 
 
-    async function irParaEntidade(
-        identificador,
-        distancia = 2
-    ) {
-        const entidade =
-            encontrarEntidade(identificador);
+    async function irParaEntidade(identificador, distancia = 2) {
+        const entidade = encontrarEntidade(identificador);
 
-        if (
-            !entidade ||
-            !entidade.position
-        ) {
+        if (!entidade || !entidade.position) {
             return false;
         }
 
@@ -270,10 +247,7 @@ function criarNavegacao(contexto) {
             destinoAtual = {
                 tipo: "entidade",
                 id: entidade.id,
-                nome:
-                    entidade.name ||
-                    entidade.username ||
-                    null,
+                nome: entidade.name || entidade.username || null,
                 distancia
             };
 
@@ -298,32 +272,19 @@ function criarNavegacao(contexto) {
     }
 
 
-    async function irParaJogador(
-        nome,
-        distancia = 2
-    ) {
+    async function irParaJogador(nome, distancia = 2) {
         if (!nome) {
             return false;
         }
 
-        return irParaEntidade(
-            nome,
-            distancia
-        );
+        return irParaEntidade(nome, distancia);
     }
 
 
-    async function seguir(
-        identificador,
-        distancia = 2
-    ) {
-        const entidade =
-            encontrarEntidade(identificador);
+    async function seguir(identificador, distancia = 2) {
+        const entidade = encontrarEntidade(identificador);
 
-        if (
-            !entidade ||
-            !entidade.position
-        ) {
+        if (!entidade || !entidade.position) {
             return false;
         }
 
@@ -338,36 +299,24 @@ function criarNavegacao(contexto) {
         }
 
         try {
-            const objetivo = new GoalFollow(
-                entidade,
-                distancia
-            );
+            const objetivo = new GoalFollow(entidade, distancia);
 
             seguindo = {
                 id: entidade.id,
-                nome:
-                    entidade.name ||
-                    entidade.username ||
-                    null,
+                nome: entidade.name || entidade.username || null,
                 distancia
             };
 
             destinoAtual = {
                 tipo: "seguir",
                 id: entidade.id,
-                nome:
-                    entidade.name ||
-                    entidade.username ||
-                    null,
+                nome: entidade.name || entidade.username || null,
                 distancia
             };
 
             navegando = true;
 
-            bot.pathfinder.setGoal(
-                objetivo,
-                true
-            );
+            bot.pathfinder.setGoal(objetivo, true);
 
             return true;
 
@@ -386,15 +335,24 @@ function criarNavegacao(contexto) {
     }
 
 
+    /*
+     * IMPORTANTE:
+     * estaNavegando() consulta bot.pathfinder.isMoving()
+     * diretamente em vez de confiar no flag interno
+     * `navegando`. Isso evita o estado "preso em navegando"
+     * quando o pathfinder termina sem emitir goal_reached
+     * (interrupção externa, morte, teleporte, etc.).
+     */
     function estaNavegando() {
         if (!inicializado) {
             return false;
         }
 
-        return (
-            navegando &&
-            bot.pathfinder.isMoving()
-        );
+        try {
+            return bot.pathfinder.isMoving();
+        } catch (_) {
+            return false;
+        }
     }
 
 
@@ -403,8 +361,14 @@ function criarNavegacao(contexto) {
     }
 
 
- function registrarEventos() {
-    bot.on(
+    function registrarEventos() {
+        if (eventosRegistrados) {
+            return false;
+        }
+
+        eventosRegistrados = true;
+
+        bot.on(
             "goal_reached",
             objetivo => {
                 navegando = false;
@@ -431,7 +395,6 @@ function criarNavegacao(contexto) {
             }
         );
 
-
         bot.on(
             "path_update",
             resultado => {
@@ -439,7 +402,15 @@ function criarNavegacao(contexto) {
                     resultado &&
                     resultado.status === "noPath"
                 ) {
+                    /*
+                     * Limpa o destino para forçar a
+                     * autonomia a replanejar. Sem isso,
+                     * o próximo ciclo tenta o mesmo
+                     * caminho inalcançável de novo.
+                     */
                     navegando = false;
+                    destinoAtual = null;
+                    seguindo = null;
 
                     if (
                         typeof contexto.enviarEvento ===
@@ -448,7 +419,7 @@ function criarNavegacao(contexto) {
                         contexto.enviarEvento(
                             "navegacao_bloqueada",
                             {
-                                destino: destinoAtual
+                                destino: null
                             }
                         );
                     }

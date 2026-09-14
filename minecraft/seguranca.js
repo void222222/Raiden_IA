@@ -3,12 +3,14 @@ function criarSeguranca(contexto) {
     const percepcao = contexto.percepcao;
     const movimento = contexto.movimento;
     const combate = contexto.combate;
+    const mundo = contexto.mundo;
 
     const CONFIG = {
         vidaCritica: 6,
         fomeCritica: 6,
         alturaMinimaVoid: 4,
-        distanciaInimigo: 8
+        distanciaInimigo: 8,
+        profundidadeVoid: 3
     };
 
     const BLOCOS_PERIGOSOS = new Set([
@@ -18,6 +20,28 @@ function criarSeguranca(contexto) {
         "soul_fire",
         "cactus",
         "magma_block"
+    ]);
+
+    /*
+     * Ações que a segurança bloqueia em perigo crítico.
+     * Ir para algum lugar quando tem lava ao lado é
+     * tão perigoso quanto andar.
+     */
+    const ACOES_MOVIMENTO = new Set([
+        "andar",
+        "ir_para",
+        "ir_para_bloco",
+        "ir_para_entidade",
+        "seguir"
+    ]);
+
+    /*
+     * Ações de ataque que a segurança bloqueia
+     * com vida crítica.
+     */
+    const ACOES_ATAQUE = new Set([
+        "atacar",
+        "atacar_proximo"
     ]);
 
     function obterVida() {
@@ -49,17 +73,37 @@ function criarSeguranca(contexto) {
             return null;
         }
 
-        try {
-            return percepcao.obterBloco(
-                Math.floor(x),
-                Math.floor(y),
-                Math.floor(z)
-            );
-        } catch (_) {
-            return null;
+        if (mundo && typeof mundo.obterBloco === "function") {
+            try {
+                return mundo.obterBloco(
+                    Math.floor(x),
+                    Math.floor(y),
+                    Math.floor(z)
+                );
+            } catch (_) {}
         }
+
+        if (
+            percepcao &&
+            typeof percepcao.obterBloco === "function"
+        ) {
+            try {
+                return percepcao.obterBloco(
+                    Math.floor(x),
+                    Math.floor(y),
+                    Math.floor(z)
+                );
+            } catch (_) {}
+        }
+
+        return null;
     }
 
+    /*
+     * Blocos adjacentes: em vez de "frente" fixo em +z,
+     * checa os quatro lados do MUNDO. Mais honesto e
+     * não perde um perigo por causa de rotação.
+     */
     function verificarPerigosAmbientais() {
         const perigos = [];
         const posicao = obterPosicao();
@@ -68,28 +112,21 @@ function criarSeguranca(contexto) {
             return perigos;
         }
 
-        const blocos = [
-            {
-                nome: "atual",
-                x: posicao.x,
-                y: posicao.y,
-                z: posicao.z
-            },
-            {
-                nome: "abaixo",
-                x: posicao.x,
-                y: posicao.y - 1,
-                z: posicao.z
-            },
-            {
-                nome: "frente",
-                x: posicao.x,
-                y: posicao.y,
-                z: posicao.z + 1
-            }
+        const px = Math.floor(posicao.x);
+        const py = Math.floor(posicao.y);
+        const pz = Math.floor(posicao.z);
+
+        const referencias = [
+            { nome: "atual", x: px, y: py, z: pz },
+            { nome: "abaixo", x: px, y: py - 1, z: pz },
+            { nome: "acima", x: px, y: py + 1, z: pz },
+            { nome: "norte", x: px, y: py, z: pz - 1 },
+            { nome: "sul", x: px, y: py, z: pz + 1 },
+            { nome: "oeste", x: px - 1, y: py, z: pz },
+            { nome: "leste", x: px + 1, y: py, z: pz }
         ];
 
-        for (const referencia of blocos) {
+        for (const referencia of referencias) {
             const bloco = obterBloco(
                 referencia.x,
                 referencia.y,
@@ -102,17 +139,17 @@ function criarSeguranca(contexto) {
 
             if (
                 BLOCOS_PERIGOSOS.has(
-                    String(bloco.nome || "")
-                        .toLowerCase()
+                    String(bloco.nome || "").toLowerCase()
                 )
             ) {
                 perigos.push({
                     tipo: "bloco_perigoso",
                     bloco: bloco.nome,
+                    direcao: referencia.nome,
                     posicao: {
-                        x: Math.floor(referencia.x),
-                        y: Math.floor(referencia.y),
-                        z: Math.floor(referencia.z)
+                        x: referencia.x,
+                        y: referencia.y,
+                        z: referencia.z
                     }
                 });
             }
@@ -122,9 +159,7 @@ function criarSeguranca(contexto) {
     }
 
     function verificarVida() {
-        if (
-            obterVida() <= CONFIG.vidaCritica
-        ) {
+        if (obterVida() <= CONFIG.vidaCritica) {
             return {
                 tipo: "vida_critica",
                 valor: obterVida()
@@ -135,9 +170,7 @@ function criarSeguranca(contexto) {
     }
 
     function verificarFome() {
-        if (
-            obterFome() <= CONFIG.fomeCritica
-        ) {
+        if (obterFome() <= CONFIG.fomeCritica) {
             return {
                 tipo: "fome_critica",
                 valor: obterFome()
@@ -147,6 +180,13 @@ function criarSeguranca(contexto) {
         return null;
     }
 
+    /*
+     * Só reporta risco_void se:
+     * - y está abaixo do mínimo, E
+     * - não há bloco sólido abaixo em N blocos.
+     *
+     * Evita falso positivo em cavernas com chão.
+     */
     function verificarVoid() {
         const posicao = obterPosicao();
 
@@ -154,17 +194,37 @@ function criarSeguranca(contexto) {
             return null;
         }
 
-        if (
-            posicao.y <=
-            CONFIG.alturaMinimaVoid
-        ) {
-            return {
-                tipo: "risco_void",
-                altura: posicao.y
-            };
+        if (posicao.y > CONFIG.alturaMinimaVoid) {
+            return null;
         }
 
-        return null;
+        const px = Math.floor(posicao.x);
+        const py = Math.floor(posicao.y);
+        const pz = Math.floor(posicao.z);
+
+        for (
+            let offset = 1;
+            offset <= CONFIG.profundidadeVoid;
+            offset++
+        ) {
+            const bloco = obterBloco(
+                px,
+                py - offset,
+                pz
+            );
+
+            if (
+                bloco &&
+                bloco.solido === true
+            ) {
+                return null;
+            }
+        }
+
+        return {
+            tipo: "risco_void",
+            altura: posicao.y
+        };
     }
 
     function verificarInimigos() {
@@ -191,39 +251,22 @@ function criarSeguranca(contexto) {
         const perigos = [];
 
         const vida = verificarVida();
-
-        if (vida) {
-            perigos.push(vida);
-        }
+        if (vida) perigos.push(vida);
 
         const fome = verificarFome();
-
-        if (fome) {
-            perigos.push(fome);
-        }
+        if (fome) perigos.push(fome);
 
         const voidPerigo = verificarVoid();
+        if (voidPerigo) perigos.push(voidPerigo);
 
-        if (voidPerigo) {
-            perigos.push(voidPerigo);
-        }
-
-        perigos.push(
-            ...verificarPerigosAmbientais()
-        );
-
-        perigos.push(
-            ...verificarInimigos()
-        );
+        perigos.push(...verificarPerigosAmbientais());
+        perigos.push(...verificarInimigos());
 
         return perigos;
     }
 
     function temPerigoCritico() {
-        const perigos =
-            obterPerigos();
-
-        return perigos.some(perigo => {
+        return obterPerigos().some(perigo => {
             return [
                 "vida_critica",
                 "risco_void",
@@ -240,41 +283,60 @@ function criarSeguranca(contexto) {
         return temPerigoCritico();
     }
 
-    function podeExecutar(acao) {
+    /*
+     * Retorna:
+     * - true                     → permitido
+     * - { permitido: false, motivo } → bloqueado
+     *
+     * Assinatura alinhada com acoes.js:
+     *   seguranca.podeExecutar(nomeAcao, args)
+     */
+    function podeExecutar(acao, parametros = {}) {
         if (!acao) {
-            return false;
+            return {
+                permitido: false,
+                motivo: "Ação não informada."
+            };
         }
 
-        if (
-            acao === "parar" ||
-            acao === "nenhuma"
-        ) {
+        if (acao === "parar" || acao === "nenhuma") {
             return true;
         }
 
+        /*
+         * Bloqueia qualquer movimento em perigo crítico.
+         * Inclui ir_para_bloco, ir_para, seguir, etc.
+         */
         if (
-            acao === "andar" &&
+            ACOES_MOVIMENTO.has(acao) &&
             temPerigoCritico()
         ) {
-            return false;
+            return {
+                permitido: false,
+                motivo:
+                    "Movimento bloqueado em perigo crítico."
+            };
         }
 
+        /*
+         * Bloqueia ataque com vida crítica.
+         */
         if (
-            acao === "atacar" &&
+            ACOES_ATAQUE.has(acao) &&
             obterVida() <= CONFIG.vidaCritica
         ) {
-            return false;
+            return {
+                permitido: false,
+                motivo:
+                    "Ataque bloqueado com vida crítica."
+            };
         }
 
         return true;
     }
 
     function limparMovimento() {
-        if (
-            movimento &&
-            typeof movimento.parar ===
-                "function"
-        ) {
+        if (movimento && typeof movimento.parar === "function") {
             movimento.parar();
         }
 
@@ -284,11 +346,7 @@ function criarSeguranca(contexto) {
     function pararTudo() {
         limparMovimento();
 
-        if (
-            combate &&
-            typeof combate.parar ===
-                "function"
-        ) {
+        if (combate && typeof combate.parar === "function") {
             combate.parar();
         }
 
@@ -300,12 +358,9 @@ function criarSeguranca(contexto) {
             vida: obterVida(),
             fome: obterFome(),
             posicao: obterPosicao(),
-            emPerigo:
-                estaEmPerigo(),
-            perigoCritico:
-                estaEmPerigoCritico(),
-            perigos:
-                obterPerigos()
+            emPerigo: estaEmPerigo(),
+            perigoCritico: estaEmPerigoCritico(),
+            perigos: obterPerigos()
         };
     }
 

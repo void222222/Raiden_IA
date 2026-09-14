@@ -22,42 +22,14 @@ Contrato de ação:
     terminou, especialmente quando várias ações
     são disparadas em sequência.
 
-Protocolo:
-
-    API
-     ↓
-    minecraft.py
-     ↓
-    {
-        tipo: "minecraft_acao",
-        acao: "andar",
-        acao_id: "abc123",
-        parametros: {
-            direcao: "frente",
-            duracao: 2
-        }
-    }
-     ↓
-    bot.js
-     ↓
-    acoes.executar("andar", { direcao: "frente", duracao: 2 })
-
-Ciclo:
-
-    AÇÃO ENVIADA
-         ↓
-    acao_pendente = ação
-         ↓
-    Minecraft executa
-         ↓
-    resultado com mesmo acao_id
-         ↓
-    ultima_acao = resultado
-         ↓
-    acao_pendente = None
+    Quando a API NÃO informa um `acao_id`,
+    o bridge gera um UUID automaticamente.
+    Isso garante que `acao_pendente` sempre
+    pode ser limpa quando o resultado chega.
 """
 
 import logging
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
@@ -77,7 +49,6 @@ class MinecraftBridge:
         self.websocket: Optional[WebSocket] = None
 
         self.conectado: bool = False
-
 
         # ====================================================
         # 🌍 ESTADO DO MINECRAFT
@@ -109,13 +80,11 @@ class MinecraftBridge:
 
         }
 
-
         # ====================================================
         # ⚔️ ÚLTIMA AÇÃO
         # ====================================================
 
         self.ultima_acao: Optional[Dict[str, Any]] = None
-
 
         # ====================================================
         # 🆔 CONTROLE DE AÇÃO
@@ -127,7 +96,6 @@ class MinecraftBridge:
             Dict[str, Any]
         ] = None
 
-
         # ====================================================
         # 💬 ÚLTIMA MENSAGEM DO CHAT
         # ====================================================
@@ -135,7 +103,6 @@ class MinecraftBridge:
         self.ultima_mensagem_chat: Optional[
             Dict[str, Any]
         ] = None
-
 
     # ========================================================
     # 🔌 CONECTAR
@@ -154,7 +121,6 @@ class MinecraftBridge:
             "⛏ Minecraft conectado à Raiden."
         )
 
-
     # ========================================================
     # 🔌 DESCONECTAR
     # ========================================================
@@ -168,7 +134,6 @@ class MinecraftBridge:
         logger.info(
             "⛏ Minecraft desconectado da Raiden."
         )
-
 
     # ========================================================
     # 📡 ENVIAR MENSAGEM
@@ -188,7 +153,6 @@ class MinecraftBridge:
 
             return False
 
-
         try:
 
             await self.websocket.send_json(
@@ -196,7 +160,6 @@ class MinecraftBridge:
             )
 
             return True
-
 
         except Exception as erro:
 
@@ -206,7 +169,6 @@ class MinecraftBridge:
             )
 
             return False
-
 
     # ========================================================
     # 🎮 ENVIAR AÇÃO
@@ -225,6 +187,10 @@ class MinecraftBridge:
         permitindo relacionar a ação enviada ao resultado
         posteriormente recebido do Minecraft.
 
+        Se `acao_id` não for informado, um UUID é gerado
+        automaticamente. Isso garante que `acao_pendente`
+        sempre poderá ser limpa quando o resultado chegar.
+
         Os parâmetros específicos da ação são agrupados
         dentro da chave `"parametros"`, mantendo o
         protocolo alinhado com o `bot.js`.
@@ -233,7 +199,6 @@ class MinecraftBridge:
 
         await minecraft_bridge.executar_acao(
             "andar",
-            acao_id="abc123",
             direcao="frente",
             duracao=2
         )
@@ -251,6 +216,10 @@ class MinecraftBridge:
         }
         """
 
+        if acao_id is None:
+
+            acao_id = str(uuid.uuid4())
+
         mensagem = {
 
             "tipo": "minecraft_acao",
@@ -263,24 +232,20 @@ class MinecraftBridge:
 
         }
 
-
         logger.info(
             f"🎮 Enviando ação para Minecraft: "
             f"{mensagem}"
         )
 
-
         enviada = await self.enviar(
             mensagem
         )
-
 
         if not enviada:
 
             self.acao_pendente = None
 
             return False
-
 
         self.ultima_acao_id = acao_id
 
@@ -296,9 +261,7 @@ class MinecraftBridge:
 
         }
 
-
         return True
-
 
     # ========================================================
     # 🚶 MOVIMENTO
@@ -316,20 +279,17 @@ class MinecraftBridge:
             duracao=duracao
         )
 
-
     async def pular(self) -> bool:
 
         return await self.executar_acao(
             "pular"
         )
 
-
     async def parar(self) -> bool:
 
         return await self.executar_acao(
             "parar"
         )
-
 
     # ========================================================
     # 👀 OLHAR
@@ -345,7 +305,6 @@ class MinecraftBridge:
             **parametros
         )
 
-
     # ========================================================
     # ⚔️ COMBATE
     # ========================================================
@@ -358,22 +317,18 @@ class MinecraftBridge:
 
         parametros = {}
 
-
         if nome is not None:
 
             parametros["nome"] = nome
-
 
         if entidade_id is not None:
 
             parametros["id"] = entidade_id
 
-
         return await self.executar_acao(
             "atacar",
             **parametros
         )
-
 
     # ========================================================
     # ⛏️ QUEBRAR BLOCO
@@ -393,7 +348,6 @@ class MinecraftBridge:
             z=z
         )
 
-
     # ========================================================
     # 🎒 EQUIPAR ITEM
     # ========================================================
@@ -410,7 +364,6 @@ class MinecraftBridge:
             destino=destino
         )
 
-
     # ========================================================
     # 🖐️ USAR ITEM
     # ========================================================
@@ -420,7 +373,6 @@ class MinecraftBridge:
         return await self.executar_acao(
             "usar"
         )
-
 
     # ========================================================
     # 🗑️ DROPAR ITEM
@@ -436,19 +388,16 @@ class MinecraftBridge:
             "nome": nome
         }
 
-
         if quantidade is not None:
 
             parametros[
                 "quantidade"
             ] = quantidade
 
-
         return await self.executar_acao(
             "dropar",
             **parametros
         )
-
 
     # ========================================================
     # 💬 CHAT
@@ -464,7 +413,6 @@ class MinecraftBridge:
             mensagem=mensagem
         )
 
-
     # ========================================================
     # 📡 ATUALIZAR ESTADO
     # ========================================================
@@ -478,6 +426,10 @@ class MinecraftBridge:
         do Minecraft.
 
         O Minecraft envia esse estado continuamente.
+
+        NOTA:
+        O bot.js envia alguns campos com nomes diferentes
+        (camelCase vs snake_case). Aceitamos os dois.
         """
 
         if not isinstance(
@@ -492,147 +444,143 @@ class MinecraftBridge:
 
             return
 
+        # ====================================================
+        # Helper: lê do estado aceitando múltiplas chaves
+        # ====================================================
+
+        def _ler(*chaves):
+            for chave in chaves:
+                if chave in estado:
+                    return estado[chave]
+            return None
 
         # ====================================================
         # 📍 POSIÇÃO
         # ====================================================
 
-        if "posicao" in estado:
+        valor = _ler("posicao")
 
-            self.estado[
-                "posicao"
-            ] = estado["posicao"]
+        if valor is not None:
 
+            self.estado["posicao"] = valor
 
         # ====================================================
         # 👀 ROTAÇÃO
         # ====================================================
 
-        if "rotacao" in estado:
+        valor = _ler("rotacao")
 
-            self.estado[
-                "rotacao"
-            ] = estado["rotacao"]
+        if valor is not None:
 
+            self.estado["rotacao"] = valor
 
         # ====================================================
         # 🏃 VELOCIDADE
         # ====================================================
 
-        if "velocidade" in estado:
+        valor = _ler("velocidade")
 
-            self.estado[
-                "velocidade"
-            ] = estado["velocidade"]
+        if valor is not None:
 
+            self.estado["velocidade"] = valor
 
         # ====================================================
         # 🧍 CHÃO
         # ====================================================
 
-        if "no_chao" in estado:
+        valor = _ler("no_chao", "noChao")
 
-            self.estado[
-                "no_chao"
-            ] = estado["no_chao"]
+        if valor is not None:
 
+            self.estado["no_chao"] = valor
 
         # ====================================================
         # ❤️ VIDA
         # ====================================================
 
-        if "vida" in estado:
+        valor = _ler("vida")
 
-            self.estado[
-                "vida"
-            ] = estado["vida"]
+        if valor is not None:
 
+            self.estado["vida"] = valor
 
         # ====================================================
         # 🍗 FOME
         # ====================================================
 
-        if "fome" in estado:
+        valor = _ler("fome")
 
-            self.estado[
-                "fome"
-            ] = estado["fome"]
+        if valor is not None:
 
+            self.estado["fome"] = valor
 
         # ====================================================
         # 🫁 OXIGÊNIO
         # ====================================================
 
-        if "oxigenio" in estado:
+        valor = _ler("oxigenio", "oxygen")
 
-            self.estado[
-                "oxigenio"
-            ] = estado["oxigenio"]
+        if valor is not None:
 
+            self.estado["oxigenio"] = valor
 
         # ====================================================
         # ⭐ EXPERIÊNCIA
         # ====================================================
+        #
+        # O bot.js envia:
+        #   "experiencia": { "nivel": N, "pontos": P, "progresso": X }
+        #
+        # Normalizamos para "nivel_experiencia" (só o nível),
+        # mantendo compatibilidade com o formato antigo.
 
-        if "nivel_experiencia" in estado:
+        exp_objeto = _ler("experiencia", "experience")
 
-            self.estado[
-                "nivel_experiencia"
-            ] = estado[
-                "nivel_experiencia"
-            ]
+        if isinstance(exp_objeto, dict):
 
+            nivel = exp_objeto.get("nivel")
+
+            if nivel is not None:
+
+                self.estado["nivel_experiencia"] = nivel
+
+        else:
+
+            valor = _ler("nivel_experiencia")
+
+            if valor is not None:
+
+                self.estado["nivel_experiencia"] = valor
 
         # ====================================================
         # 🖐️ ITEM NA MÃO
         # ====================================================
 
-        if "item_na_mao" in estado:
+        valor = _ler("item_na_mao", "itemNaMao")
 
-            self.estado[
-                "item_na_mao"
-            ] = estado["item_na_mao"]
+        if valor is not None:
 
+            self.estado["item_na_mao"] = valor
 
         # ====================================================
         # 🎒 INVENTÁRIO
         # ====================================================
 
-        if "inventario" in estado:
+        inventario = _ler("inventario")
 
-            inventario = estado[
-                "inventario"
-            ]
+        if isinstance(inventario, list):
 
-            if isinstance(
-                inventario,
-                list
-            ):
-
-                self.estado[
-                    "inventario"
-                ] = inventario
-
+            self.estado["inventario"] = inventario
 
         # ====================================================
         # 👾 ENTIDADES
         # ====================================================
 
-        if "entidades" in estado:
+        entidades = _ler("entidades")
 
-            entidades = estado[
-                "entidades"
-            ]
+        if isinstance(entidades, list):
 
-            if isinstance(
-                entidades,
-                list
-            ):
-
-                self.estado[
-                    "entidades"
-                ] = entidades
-
+            self.estado["entidades"] = entidades
 
     # ========================================================
     # ⚔️ RESULTADO DE AÇÃO
@@ -664,23 +612,19 @@ class MinecraftBridge:
 
             return
 
-
         self.ultima_acao = dict(
             resultado
         )
 
-
         acao_id = resultado.get(
             "acao_id"
         )
-
 
         if acao_id is not None:
 
             self.ultima_acao_id = str(
                 acao_id
             )
-
 
         if (
             self.acao_pendente
@@ -693,7 +637,6 @@ class MinecraftBridge:
                 )
             )
 
-
             if (
                 acao_id is not None
                 and str(acao_id)
@@ -702,12 +645,10 @@ class MinecraftBridge:
 
                 self.acao_pendente = None
 
-
         logger.info(
             f"🎮 Resultado da ação Minecraft: "
             f"{resultado}"
         )
-
 
     # ========================================================
     # 💬 RECEBER CHAT
@@ -729,14 +670,11 @@ class MinecraftBridge:
 
             return
 
-
         self.ultima_mensagem_chat = mensagem
-
 
         logger.info(
             f"💬 Minecraft: {mensagem}"
         )
-
 
     # ========================================================
     # 🌍 OBTER ESTADO
@@ -797,7 +735,6 @@ class MinecraftBridge:
 
         }
 
-
     # ========================================================
     # 🎮 OBTER ÚLTIMA AÇÃO
     # ========================================================
@@ -810,11 +747,9 @@ class MinecraftBridge:
 
             return None
 
-
         return dict(
             self.ultima_acao
         )
-
 
     # ========================================================
     # 🆔 OBTER ID DA ÚLTIMA AÇÃO
@@ -825,7 +760,6 @@ class MinecraftBridge:
     ) -> Optional[str]:
 
         return self.ultima_acao_id
-
 
     # ========================================================
     # ⏳ OBTER AÇÃO PENDENTE
@@ -839,11 +773,9 @@ class MinecraftBridge:
 
             return None
 
-
         return dict(
             self.acao_pendente
         )
-
 
     # ========================================================
     # 💬 OBTER ÚLTIMO CHAT
@@ -860,11 +792,9 @@ class MinecraftBridge:
 
             return None
 
-
         return dict(
             self.ultima_mensagem_chat
         )
-
 
     # ========================================================
     # 📊 RESUMO PARA A RAÍDEN

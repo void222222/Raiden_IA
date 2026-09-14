@@ -14,6 +14,18 @@ function criarConexao(contexto) {
     let ws = null;
     let conectada = false;
 
+    /*
+     * Impede dois sockets paralelos se conectar()
+     * for chamada várias vezes em sequência.
+     */
+    let conectando = false;
+
+    /*
+     * Bloqueia reconexão automática depois de
+     * desconectar() explícito (ex: no end do bot).
+     */
+    let desligando = false;
+
     let timerReconexao = null;
     let timerEstado = null;
     let timerPing = null;
@@ -23,14 +35,8 @@ function criarConexao(contexto) {
     let callbackFechada = null;
     let callbackErro = null;
 
-    function definirCallback(
-        tipo,
-        callback
-    ) {
-        if (
-            typeof callback !==
-            "function"
-        ) {
+    function definirCallback(tipo, callback) {
+        if (typeof callback !== "function") {
             return false;
         }
 
@@ -59,17 +65,12 @@ function criarConexao(contexto) {
     }
 
     function enviar(dados) {
-        if (
-            !ws ||
-            ws.readyState !== 1
-        ) {
+        if (!ws || ws.readyState !== 1) {
             return false;
         }
 
         try {
-            ws.send(
-                JSON.stringify(dados)
-            );
+            ws.send(JSON.stringify(dados));
 
             return true;
 
@@ -84,15 +85,28 @@ function criarConexao(contexto) {
     }
 
     function enviarEstado() {
-        if (
-            typeof contexto.criarEstado !==
-            "function"
-        ) {
+        if (typeof contexto.criarEstado !== "function") {
             return false;
         }
 
-        const estado =
-            contexto.criarEstado();
+        /*
+         * criarEstado() chama obterEstado() de vários
+         * módulos. Se qualquer um lançar (ex: bot.entity
+         * nulo logo após spawn), a exceção sobe e derruba
+         * o setInterval de estado.
+         */
+        let estado;
+
+        try {
+            estado = contexto.criarEstado();
+        } catch (erro) {
+            console.error(
+                "📡 Erro ao montar estado:",
+                erro.message
+            );
+
+            return false;
+        }
 
         return enviar({
             tipo: "estado",
@@ -110,68 +124,63 @@ function criarConexao(contexto) {
     function iniciarAtualizacaoEstado() {
         pararAtualizacaoEstado();
 
-        timerEstado =
-            setInterval(
-                () => {
-                    if (conectada) {
-                        enviarEstado();
-                    }
-                },
-                CONFIG.intervaloEstado
-            );
+        timerEstado = setInterval(() => {
+            if (conectada) {
+                enviarEstado();
+            }
+        }, CONFIG.intervaloEstado);
 
-        timerPing =
-            setInterval(
-                () => {
-                    if (conectada) {
-                        enviarPing();
-                    }
-                },
-                CONFIG.intervaloPing
-            );
+        timerPing = setInterval(() => {
+            if (conectada) {
+                enviarPing();
+            }
+        }, CONFIG.intervaloPing);
     }
 
     function pararAtualizacaoEstado() {
         if (timerEstado) {
-            clearInterval(
-                timerEstado
-            );
-
+            clearInterval(timerEstado);
             timerEstado = null;
         }
 
         if (timerPing) {
-            clearInterval(
-                timerPing
-            );
-
+            clearInterval(timerPing);
             timerPing = null;
         }
     }
 
     function agendarReconexao() {
+        if (desligando) {
+            return;
+        }
+
         if (timerReconexao) {
             return;
         }
 
-        timerReconexao =
-            setTimeout(
-                () => {
-                    timerReconexao = null;
+        timerReconexao = setTimeout(() => {
+            timerReconexao = null;
 
-                    conectar();
-                },
-                CONFIG.intervaloReconexao
-            );
+            conectar();
+        }, CONFIG.intervaloReconexao);
     }
 
     function conectar() {
+        /*
+         * Bloqueia se estamos desligando explicitamente.
+         * Reativado por desconectar() → conectar() manual.
+         */
+        if (desligando) {
+            return;
+        }
+
+        if (conectando) {
+            return;
+        }
+
         if (
             ws &&
-            (
-                ws.readyState === 0 ||
-                ws.readyState === 1
-            )
+            (ws.readyState === 0 || ws.readyState === 1)
         ) {
             return;
         }
@@ -179,10 +188,7 @@ function criarConexao(contexto) {
         let novaConexao;
 
         try {
-            novaConexao =
-                new WebSocket(
-                    CONFIG.url
-                );
+            novaConexao = new WebSocket(CONFIG.url);
         } catch (erro) {
             console.error(
                 "📡 Erro ao criar WebSocket:",
@@ -191,10 +197,7 @@ function criarConexao(contexto) {
 
             conectada = false;
 
-            if (
-                typeof callbackErro ===
-                "function"
-            ) {
+            if (typeof callbackErro === "function") {
                 callbackErro(erro);
             }
 
@@ -203,6 +206,7 @@ function criarConexao(contexto) {
             return;
         }
 
+        conectando = true;
         ws = novaConexao;
 
         novaConexao.onopen = () => {
@@ -210,6 +214,7 @@ function criarConexao(contexto) {
                 return;
             }
 
+            conectando = false;
             conectada = true;
 
             console.log(
@@ -227,105 +232,78 @@ function criarConexao(contexto) {
 
             enviarEstado();
 
-            if (
-                typeof callbackAberta ===
-                "function"
-            ) {
+            if (typeof callbackAberta === "function") {
                 callbackAberta();
             }
         };
 
-        novaConexao.onmessage =
-            evento => {
-                if (
-                    ws !== novaConexao
-                ) {
+        novaConexao.onmessage = evento => {
+            if (ws !== novaConexao) {
+                return;
+            }
+
+            try {
+                const dados = JSON.parse(evento.data);
+
+                if (dados.tipo === "pong") {
                     return;
                 }
 
-                try {
-                    const dados =
-                        JSON.parse(
-                            evento.data
-                        );
-
-                    if (
-                        dados.tipo ===
-                        "pong"
-                    ) {
-                        return;
-                    }
-
-                    if (
-                        typeof callbackMensagem ===
-                        "function"
-                    ) {
-                        callbackMensagem(
-                            dados
-                        );
-                    }
-
-                } catch (erro) {
-                    console.error(
-                        "📡 Mensagem WebSocket inválida:",
-                        erro.message
-                    );
-                }
-            };
-
-        novaConexao.onerror =
-            erro => {
-                if (
-                    ws !== novaConexao
-                ) {
-                    return;
+                if (typeof callbackMensagem === "function") {
+                    callbackMensagem(dados);
                 }
 
-                if (
-                    typeof callbackErro ===
-                    "function"
-                ) {
-                    callbackErro(erro);
-                }
-            };
-
-        novaConexao.onclose =
-            evento => {
-                if (
-                    ws !== novaConexao
-                ) {
-                    return;
-                }
-
-                conectada = false;
-
-                pararAtualizacaoEstado();
-
-                ws = null;
-
-                console.log(
-                    "📡 Conexão com a Raiden encerrada."
+            } catch (erro) {
+                console.error(
+                    "📡 Mensagem WebSocket inválida:",
+                    erro.message
                 );
+            }
+        };
 
-                if (
-                    typeof callbackFechada ===
-                    "function"
-                ) {
-                    callbackFechada(
-                        evento
-                    );
-                }
+        novaConexao.onerror = erro => {
+            if (ws !== novaConexao) {
+                return;
+            }
 
-                agendarReconexao();
-            };
+            if (typeof callbackErro === "function") {
+                callbackErro(erro);
+            }
+        };
+
+        novaConexao.onclose = evento => {
+            if (ws !== novaConexao) {
+                return;
+            }
+
+            conectando = false;
+            conectada = false;
+
+            pararAtualizacaoEstado();
+
+            ws = null;
+
+            console.log(
+                "📡 Conexão com a Raiden encerrada."
+            );
+
+            if (typeof callbackFechada === "function") {
+                callbackFechada(evento);
+            }
+
+            agendarReconexao();
+        };
     }
 
     function desconectar() {
-        if (timerReconexao) {
-            clearTimeout(
-                timerReconexao
-            );
+        /*
+         * Marca desligamento para impedir que o
+         * onclose agende reconexão automática.
+         */
+        desligando = true;
 
+        if (timerReconexao) {
+            clearTimeout(timerReconexao);
             timerReconexao = null;
         }
 
@@ -335,18 +313,28 @@ function criarConexao(contexto) {
 
         ws = null;
         conectada = false;
+        conectando = false;
 
         if (
             conexaoAtual &&
-            (
-                conexaoAtual.readyState === 0 ||
-                conexaoAtual.readyState === 1
-            )
+            (conexaoAtual.readyState === 0 ||
+                conexaoAtual.readyState === 1)
         ) {
             try {
                 conexaoAtual.close();
             } catch (_) {}
         }
+
+        return true;
+    }
+
+    /*
+     * Reabilita reconexão. Usado quando o bot
+     * quer se reconectar explicitamente após
+     * um desconectar() anterior.
+     */
+    function reabilitarReconexao() {
+        desligando = false;
 
         return true;
     }
@@ -362,6 +350,7 @@ function criarConexao(contexto) {
     return {
         conectar,
         desconectar,
+        reabilitarReconexao,
         enviar,
         enviarEstado,
         iniciarAtualizacaoEstado,

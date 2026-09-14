@@ -3,7 +3,7 @@
  *
  * Responsável por interação direta com o mundo:
  * - consultar blocos
- * - procurar blocos
+ * - procurar blocos (um ou vários nomes)
  * - quebrar blocos
  * - colocar blocos
  * - interagir com blocos
@@ -21,9 +21,13 @@ function criarMundo(contexto) {
     const CONFIG = {
         distanciaMaximaInteracao: 4.5,
         distanciaMaximaQuebra: 5,
-        raioBuscaMaximo: 16,
-        limiteBusca: 100
+        raioBuscaMaximo: 32,
+        limiteBusca: 200
     };
+
+    // =========================================================
+    // 📍 GEOMETRIA
+    // =========================================================
 
     function posicaoValida(x, y, z) {
         return (
@@ -38,48 +42,32 @@ function criarMundo(contexto) {
     }
 
     function distanciaDoBot(posicao) {
-        const origem =
-            obterPosicaoBot();
+        const origem = obterPosicaoBot();
 
         if (!origem || !posicao) {
             return Infinity;
         }
 
-        const dx =
-            origem.x - posicao.x;
+        const dx = origem.x - posicao.x;
+        const dy = origem.y - posicao.y;
+        const dz = origem.z - posicao.z;
 
-        const dy =
-            origem.y - posicao.y;
-
-        const dz =
-            origem.z - posicao.z;
-
-        return Math.sqrt(
-            dx * dx +
-            dy * dy +
-            dz * dz
-        );
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     function estaAoAlcance(
         posicao,
-        distanciaMaxima =
-            CONFIG.distanciaMaximaInteracao
+        distanciaMaxima = CONFIG.distanciaMaximaInteracao
     ) {
-        return (
-            distanciaDoBot(posicao) <=
-            distanciaMaxima
-        );
+        return distanciaDoBot(posicao) <= distanciaMaxima;
     }
 
+    // =========================================================
+    // 🧱 CONSULTA DE BLOCO
+    // =========================================================
+
     function obterBloco(x, y, z) {
-        if (
-            !posicaoValida(
-                x,
-                y,
-                z
-            )
-        ) {
+        if (!posicaoValida(x, y, z)) {
             return null;
         }
 
@@ -109,175 +97,203 @@ function criarMundo(contexto) {
         return {
             id: bloco.type,
             nome: bloco.name,
-            displayName:
-                bloco.displayName,
+            displayName: bloco.displayName,
             posicao: {
                 x: bloco.position.x,
                 y: bloco.position.y,
                 z: bloco.position.z
             },
-            solido:
-                bloco.boundingBox ===
-                "block",
-            diggavel:
-                bloco.diggable !== false,
-            transparente:
-                bloco.transparent === true
+            solido: bloco.boundingBox === "block",
+            diggavel: bloco.diggable !== false,
+            transparente: bloco.transparent === true
         };
     }
 
-    function obterBlocoEstado(
-        x,
-        y,
-        z
-    ) {
-        return serializarBloco(
-            obterBloco(
-                x,
-                y,
-                z
-            )
-        );
+    function obterBlocoEstado(x, y, z) {
+        return serializarBloco(obterBloco(x, y, z));
     }
+
+    // =========================================================
+    // 🔍 NORMALIZAÇÃO DE NOMES
+    // =========================================================
+
+    /*
+     * Aceita:
+     *   "oak_log"              → { nomes: ["oak_log"], ids: [id] }
+     *   ["oak_log", "birch"]   → múltiplos
+     *
+     * Filtra nomes desconhecidos do registry.
+     */
+    function normalizarNomes(nome) {
+        let lista = [];
+
+        if (Array.isArray(nome)) {
+            lista = nome;
+        } else if (typeof nome === "string") {
+            lista = [nome];
+        } else {
+            return { nomes: [], ids: [] };
+        }
+
+        const nomes = [];
+        const ids = [];
+
+        for (const bruto of lista) {
+            const limpo = String(bruto || "")
+                .trim()
+                .toLowerCase();
+
+            if (!limpo) continue;
+
+            const id = bot.registry?.blocksByName?.[limpo]?.id;
+
+            if (id === undefined || id === null) {
+                continue;
+            }
+
+            nomes.push(limpo);
+            ids.push(id);
+        }
+
+        return { nomes, ids };
+    }
+
+    // =========================================================
+    // 🔍 ENCONTRAR BLOCOS
+    // =========================================================
+    //
+    // Aceita string OU array de strings.
+    //
+    // Retorna lista de blocos no formato:
+    //   {
+    //     id, nome, displayName,
+    //     posicao: { x, y, z },
+    //     distancia,
+    //     nomeEncontrado   // qual dos nomes da lista casou
+    //   }
+    //
+    // Ordenado por distância crescente.
 
     function encontrarBlocos(
         nome,
-        distanciaMaxima = 8,
+        distanciaMaxima = 16,
         limite = 20
     ) {
-        const origem =
-            obterPosicaoBot();
+        const origem = obterPosicaoBot();
 
         if (!origem) {
             return [];
         }
 
-        const alvo =
-            String(
-                nome || ""
-            )
-                .trim()
-                .toLowerCase();
+        const { nomes, ids } = normalizarNomes(nome);
 
-        if (!alvo) {
+        if (!ids.length) {
             return [];
         }
 
         const raio = Math.min(
-            Math.max(
-                1,
-                Math.floor(
-                    distanciaMaxima
-                )
-            ),
+            Math.max(1, Math.floor(distanciaMaxima)),
             CONFIG.raioBuscaMaximo
         );
 
         const quantidade = Math.min(
-            Math.max(
-                1,
-                Math.floor(
-                    limite
-                )
-            ),
+            Math.max(1, Math.floor(limite)),
             CONFIG.limiteBusca
         );
 
-        const origemX =
-            Math.floor(origem.x);
+        /*
+         * bot.findBlocks aceita:
+         *   matching: id | array de ids | função
+         *
+         * Usamos função pra confirmar que o id está na lista
+         * que queremos. Isso evita falsos positivos se
+         * `bot.findBlocks` fizer alguma normalização interna.
+         */
+        const idsSet = new Set(ids);
 
-        const origemY =
-            Math.floor(origem.y);
+        let posicoes = [];
 
-        const origemZ =
-            Math.floor(origem.z);
-
-        const encontrados = [];
-
-        for (
-            let x =
-                origemX - raio;
-            x <=
-                origemX + raio;
-            x++
-        ) {
-            for (
-                let y =
-                    origemY - raio;
-                y <=
-                    origemY + raio;
-                y++
-            ) {
-                for (
-                    let z =
-                        origemZ - raio;
-                    z <=
-                        origemZ + raio;
-                    z++
-                ) {
-                    const bloco =
-                        obterBloco(
-                            x,
-                            y,
-                            z
-                        );
-
-                    if (
-                        !bloco ||
-                        String(
-                            bloco.name || ""
-                        ).toLowerCase() !==
-                            alvo
-                    ) {
-                        continue;
+        try {
+            posicoes = bot.findBlocks({
+                matching: (bloco) => {
+                    if (!bloco) return false;
+                    if (typeof bloco === "number") {
+                        return idsSet.has(bloco);
                     }
-
-                    encontrados.push({
-                        id: bloco.type,
-                        nome: bloco.name,
-                        displayName:
-                            bloco.displayName,
-                        posicao: {
-                            x,
-                            y,
-                            z
-                        },
-                        distancia:
-                            distanciaDoBot(
-                                bloco.position
-                            )
-                    });
-
-                    if (
-                        encontrados.length >=
-                        quantidade
-                    ) {
-                        return encontrados.sort(
-                            (a, b) =>
-                                a.distancia -
-                                b.distancia
-                        );
-                    }
-                }
+                    return idsSet.has(bloco.type);
+                },
+                maxDistance: raio,
+                count: quantidade
+            });
+        } catch (erro) {
+            /*
+             * Fallback: versões antigas do Mineflayer não
+             * aceitam função em `matching`. Passa o array
+             * de ids direto.
+             */
+            try {
+                posicoes = bot.findBlocks({
+                    matching: ids,
+                    maxDistance: raio,
+                    count: quantidade
+                });
+            } catch (erro2) {
+                console.error(
+                    "🌍 Erro em bot.findBlocks:",
+                    erro2.message
+                );
+                return [];
             }
         }
 
-        return encontrados.sort(
-            (a, b) =>
-                a.distancia -
-                b.distancia
+        if (!Array.isArray(posicoes) || !posicoes.length) {
+            return [];
+        }
+
+        const encontrados = [];
+
+        for (const pos of posicoes) {
+            const bloco = bot.blockAt(pos);
+
+            if (!bloco) continue;
+
+            const nomeEncontrado = String(
+                bloco.name || ""
+            ).toLowerCase();
+
+            // Aceita só se o nome está na lista pedida
+            if (nomes.length && !nomes.includes(nomeEncontrado)) {
+                continue;
+            }
+
+            encontrados.push({
+                id: bloco.type,
+                nome: bloco.name,
+                displayName: bloco.displayName,
+                nomeEncontrado,
+                posicao: {
+                    x: bloco.position.x,
+                    y: bloco.position.y,
+                    z: bloco.position.z
+                },
+                distancia: distanciaDoBot(bloco.position)
+            });
+        }
+
+        encontrados.sort(
+            (a, b) => a.distancia - b.distancia
         );
+
+        return encontrados;
     }
 
-    function normalizarFace(
-        face
-    ) {
+    // =========================================================
+    // 🎯 FACE / REFERÊNCIA
+    // =========================================================
+
+    function normalizarFace(face) {
         if (!face) {
-            return {
-                x: 0,
-                y: 1,
-                z: 0
-            };
+            return { x: 0, y: 1, z: 0 };
         }
 
         return {
@@ -287,14 +303,8 @@ function criarMundo(contexto) {
         };
     }
 
-    function obterBlocoReferencia(
-        x,
-        y,
-        z,
-        face
-    ) {
-        const normal =
-            normalizarFace(face);
+    function obterBlocoReferencia(x, y, z, face) {
+        const normal = normalizarFace(face);
 
         return obterBloco(
             x - normal.x,
@@ -303,25 +313,18 @@ function criarMundo(contexto) {
         );
     }
 
-    async function quebrar(
-        x,
-        y,
-        z
-    ) {
-        const bloco =
-            obterBloco(
-                x,
-                y,
-                z
-            );
+    // =========================================================
+    // ⛏ QUEBRAR
+    // =========================================================
+
+    async function quebrar(x, y, z) {
+        const bloco = obterBloco(x, y, z);
 
         if (!bloco) {
             return false;
         }
 
-        if (
-            bloco.diggable === false
-        ) {
+        if (bloco.diggable === false) {
             return false;
         }
 
@@ -335,24 +338,14 @@ function criarMundo(contexto) {
         }
 
         try {
-            if (
-                bot.targetDigBlock !==
-                bloco
-            ) {
+            if (bot.targetDigBlock !== bloco) {
                 await bot.lookAt(
-                    bloco.position.offset(
-                        0.5,
-                        0.5,
-                        0.5
-                    ),
+                    bloco.position.offset(0.5, 0.5, 0.5),
                     true
                 );
             }
 
-            await bot.dig(
-                bloco,
-                true
-            );
+            await bot.dig(bloco, true);
 
             return true;
         } catch (erro) {
@@ -365,95 +358,64 @@ function criarMundo(contexto) {
         }
     }
 
+    // =========================================================
+    // 🧱 COLOCAR
+    // =========================================================
+
     async function colocar(
         nomeItem,
         x,
         y,
         z,
-        face = {
-            x: 0,
-            y: 1,
-            z: 0
-        }
+        face = { x: 0, y: 1, z: 0 }
     ) {
-        if (
-            !posicaoValida(
-                x,
-                y,
-                z
-            )
-        ) {
+        if (!posicaoValida(x, y, z)) {
             return false;
         }
 
-        const alvo =
-            obterBloco(
-                x,
-                y,
-                z
-            );
+        const alvo = obterBloco(x, y, z);
 
         if (!alvo) {
             return false;
         }
 
         if (
-            alvo.name !==
-            "air" &&
-            alvo.boundingBox !==
-                "empty"
+            alvo.name !== "air" &&
+            alvo.boundingBox !== "empty"
         ) {
             return false;
         }
 
-        const referencia =
-            obterBlocoReferencia(
-                x,
-                y,
-                z,
-                face
-            );
+        const referencia = obterBlocoReferencia(
+            x,
+            y,
+            z,
+            face
+        );
 
         if (!referencia) {
             return false;
         }
 
-        if (
-            referencia.boundingBox ===
-            "empty"
-        ) {
+        if (referencia.boundingBox === "empty") {
             return false;
         }
 
-        if (
-            !estaAoAlcance(
-                referencia.position
-            )
-        ) {
+        if (!estaAoAlcance(referencia.position)) {
             return false;
         }
 
-        const item =
-            inventario.procurarItem(
-                nomeItem
-            );
+        const item = inventario.procurarItem(nomeItem);
 
         if (!item) {
             return false;
         }
 
         try {
-            await bot.equip(
-                item,
-                "hand"
-            );
+            await bot.equip(item, "hand");
 
             await bot.lookAt(
-                referencia.position.offset(
-                    0.5,
-                    0.5,
-                    0.5
-                ),
+                referencia.position.offset(0.5, 0.5, 0.5),
                 true
             );
 
@@ -473,43 +435,28 @@ function criarMundo(contexto) {
         }
     }
 
-    async function interagir(
-        x,
-        y,
-        z
-    ) {
-        const bloco =
-            obterBloco(
-                x,
-                y,
-                z
-            );
+    // =========================================================
+    // 👆 INTERAGIR
+    // =========================================================
+
+    async function interagir(x, y, z) {
+        const bloco = obterBloco(x, y, z);
 
         if (!bloco) {
             return false;
         }
 
-        if (
-            !estaAoAlcance(
-                bloco.position
-            )
-        ) {
+        if (!estaAoAlcance(bloco.position)) {
             return false;
         }
 
         try {
             await bot.lookAt(
-                bloco.position.offset(
-                    0.5,
-                    0.5,
-                    0.5
-                ),
+                bloco.position.offset(0.5, 0.5, 0.5),
                 true
             );
 
-            await bot.activateBlock(
-                bloco
-            );
+            await bot.activateBlock(bloco);
 
             return true;
         } catch (erro) {
@@ -522,24 +469,20 @@ function criarMundo(contexto) {
         }
     }
 
-    async function usarItem(
-        nomeItem = null
-    ) {
+    // =========================================================
+    // 🖐️ USAR ITEM
+    // =========================================================
+
+    async function usarItem(nomeItem = null) {
         try {
             if (nomeItem) {
-                const item =
-                    inventario.procurarItem(
-                        nomeItem
-                    );
+                const item = inventario.procurarItem(nomeItem);
 
                 if (!item) {
                     return false;
                 }
 
-                await bot.equip(
-                    item,
-                    "hand"
-                );
+                await bot.equip(item, "hand");
             }
 
             bot.activateItem();
@@ -555,21 +498,15 @@ function criarMundo(contexto) {
         }
     }
 
-    function obterBlocoSob(
-        x = null,
-        y = null,
-        z = null
-    ) {
+    // =========================================================
+    // 🧭 ADJACENTES
+    // =========================================================
+
+    function obterBlocoSob(x = null, y = null, z = null) {
         const posicao =
-            x === null ||
-            y === null ||
-            z === null
+            x === null || y === null || z === null
                 ? obterPosicaoBot()
-                : {
-                    x,
-                    y,
-                    z
-                };
+                : { x, y, z };
 
         if (!posicao) {
             return null;
@@ -582,151 +519,76 @@ function criarMundo(contexto) {
         );
     }
 
-    function obterBlocosAoRedor(
-        x = null,
-        y = null,
-        z = null
-    ) {
+    function obterBlocosAoRedor(x = null, y = null, z = null) {
         const posicao =
-            x === null ||
-            y === null ||
-            z === null
+            x === null || y === null || z === null
                 ? obterPosicaoBot()
-                : {
-                    x,
-                    y,
-                    z
-                };
+                : { x, y, z };
 
         if (!posicao) {
             return {};
         }
 
-        const px =
-            Math.floor(posicao.x);
-
-        const py =
-            Math.floor(posicao.y);
-
-        const pz =
-            Math.floor(posicao.z);
+        const px = Math.floor(posicao.x);
+        const py = Math.floor(posicao.y);
+        const pz = Math.floor(posicao.z);
 
         return {
-            atual:
-                obterBlocoEstado(
-                    px,
-                    py,
-                    pz
-                ),
-
-            abaixo:
-                obterBlocoEstado(
-                    px,
-                    py - 1,
-                    pz
-                ),
-
-            acima:
-                obterBlocoEstado(
-                    px,
-                    py + 1,
-                    pz
-                ),
-
-            norte:
-                obterBlocoEstado(
-                    px,
-                    py,
-                    pz - 1
-                ),
-
-            sul:
-                obterBlocoEstado(
-                    px,
-                    py,
-                    pz + 1
-                ),
-
-            oeste:
-                obterBlocoEstado(
-                    px - 1,
-                    py,
-                    pz
-                ),
-
-            leste:
-                obterBlocoEstado(
-                    px + 1,
-                    py,
-                    pz
-                )
+            atual: obterBlocoEstado(px, py, pz),
+            abaixo: obterBlocoEstado(px, py - 1, pz),
+            acima: obterBlocoEstado(px, py + 1, pz),
+            norte: obterBlocoEstado(px, py, pz - 1),
+            sul: obterBlocoEstado(px, py, pz + 1),
+            oeste: obterBlocoEstado(px - 1, py, pz),
+            leste: obterBlocoEstado(px + 1, py, pz)
         };
     }
 
-    function estaLivre(
-        x,
-        y,
-        z
-    ) {
-        const bloco =
-            obterBloco(
-                x,
-                y,
-                z
-            );
+    // =========================================================
+    // ✅ CONSULTAS RÁPIDAS
+    // =========================================================
+
+    function estaLivre(x, y, z) {
+        const bloco = obterBloco(x, y, z);
 
         if (!bloco) {
             return false;
         }
 
-        return (
-            bloco.boundingBox ===
-            "empty"
-        );
+        return bloco.boundingBox === "empty";
     }
 
-    function estaSolido(
-        x,
-        y,
-        z
-    ) {
-        const bloco =
-            obterBloco(
-                x,
-                y,
-                z
-            );
+    function estaSolido(x, y, z) {
+        const bloco = obterBloco(x, y, z);
 
         if (!bloco) {
             return false;
         }
 
-        return (
-            bloco.boundingBox ===
-            "block"
-        );
+        return bloco.boundingBox === "block";
     }
+
+    // =========================================================
+    // 📊 ESTADO
+    // =========================================================
 
     function obterEstado() {
-        const posicao =
-            obterPosicaoBot();
+        const posicao = obterPosicaoBot();
 
         return {
             posicao: posicao
-                ? {
-                    x: posicao.x,
-                    y: posicao.y,
-                    z: posicao.z
-                }
+                ? { x: posicao.x, y: posicao.y, z: posicao.z }
                 : null,
 
-            blocoSob:
-                obterBlocoSob(),
+            blocoSob: obterBlocoSob(),
 
-            blocosAoRedor:
-                obterBlocosAoRedor()
+            blocosAoRedor: obterBlocosAoRedor()
         };
     }
+
+    // =========================================================
+    // 🔌 API PÚBLICA
+    // =========================================================
 
     return {
         obterBloco,

@@ -120,7 +120,7 @@ function criarAcoes(contexto) {
                 case "olhar":
                     return resultado(
                         nomeAcao,
-                        await movimento.olhar(
+                        await movimento.olharPara(
                             Number(args.x),
                             Number(args.y),
                             Number(args.z)
@@ -332,13 +332,15 @@ function criarAcoes(contexto) {
                                     largura: Number(
                                         args.largura ?? 5
                                     ),
-                                    profundidade: Number(
-                                        args.profundidade ?? 5
+                                    comprimento: Number(
+                                        args.comprimento ??
+                                            args.profundidade ??
+                                            5
                                     ),
                                     altura: Number(
                                         args.altura ?? 3
                                     ),
-                                    nomeItem:
+                                    nomeBloco:
                                         args.nomeItem ??
                                         args.item ??
                                         "oak_planks"
@@ -362,7 +364,10 @@ function criarAcoes(contexto) {
                                     altura: Number(
                                         args.altura
                                     ),
-                                    nomeItem:
+                                    direcao:
+                                        args.direcao ??
+                                        "x",
+                                    nomeBloco:
                                         args.nomeItem ??
                                         args.item
                                 })
@@ -382,10 +387,11 @@ function criarAcoes(contexto) {
                                     largura: Number(
                                         args.largura
                                     ),
-                                    profundidade: Number(
-                                        args.profundidade
+                                    comprimento: Number(
+                                        args.comprimento ??
+                                            args.profundidade
                                     ),
-                                    nomeItem:
+                                    nomeBloco:
                                         args.nomeItem ??
                                         args.item
                                 })
@@ -405,10 +411,11 @@ function criarAcoes(contexto) {
                                     largura: Number(
                                         args.largura
                                     ),
-                                    profundidade: Number(
-                                        args.profundidade
+                                    comprimento: Number(
+                                        args.comprimento ??
+                                            args.profundidade
                                     ),
-                                    nomeItem:
+                                    nomeBloco:
                                         args.nomeItem ??
                                         args.item
                                 })
