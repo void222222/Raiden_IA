@@ -12,6 +12,8 @@
  * Não decide o que fazer.
  */
 
+const { Vec3 } = require("vec3");
+
 function criarMundo(contexto) {
     const bot = contexto.bot;
     const inventario = contexto.inventario;
@@ -82,11 +84,13 @@ function criarMundo(contexto) {
         }
 
         try {
-            return bot.blockAt({
-                x: Math.floor(x),
-                y: Math.floor(y),
-                z: Math.floor(z)
-            });
+            const pos = new Vec3(
+                Math.floor(Number(x)),
+                Math.floor(Number(y)),
+                Math.floor(Number(z))
+            );
+
+            return bot.blockAt(pos);
         } catch (erro) {
             console.error(
                 "🌍 Erro ao obter bloco:",

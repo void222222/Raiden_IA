@@ -4,6 +4,8 @@ const {
     goals
 } = require("mineflayer-pathfinder");
 
+const minecraftData = require("minecraft-data");
+
 const {
     GoalBlock,
     GoalNear,
@@ -36,8 +38,11 @@ function criarNavegacao(contexto) {
         try {
             bot.loadPlugin(pathfinder);
 
+            const mcData = minecraftData(bot.version);
+
             const movimentos = new Movements(
-                bot
+                bot,
+                mcData
             );
 
             movimentos.canDig =
@@ -66,7 +71,7 @@ function criarNavegacao(contexto) {
         } catch (erro) {
             console.error(
                 "🧭 Erro ao inicializar navegação:",
-                erro.message
+                erro
             );
 
             return false;
@@ -80,9 +85,7 @@ function criarNavegacao(contexto) {
         }
 
         try {
-            bot.pathfinder.setGoal(
-                null
-            );
+            bot.pathfinder.setGoal(null);
         } catch (_) {
             // Ignora se não houver objetivo.
         }
@@ -95,11 +98,7 @@ function criarNavegacao(contexto) {
     }
 
 
-    async function irPara(
-        x,
-        y,
-        z
-    ) {
+    async function irPara(x, y, z) {
         if (
             !Number.isFinite(x) ||
             !Number.isFinite(y) ||
@@ -113,12 +112,11 @@ function criarNavegacao(contexto) {
         }
 
         try {
-            const objetivo =
-                new GoalBlock(
-                    Math.floor(x),
-                    Math.floor(y),
-                    Math.floor(z)
-                );
+            const objetivo = new GoalBlock(
+                Math.floor(x),
+                Math.floor(y),
+                Math.floor(z)
+            );
 
             destinoAtual = {
                 tipo: "bloco",
@@ -130,9 +128,7 @@ function criarNavegacao(contexto) {
             seguindo = null;
             navegando = true;
 
-            bot.pathfinder.setGoal(
-                objetivo
-            );
+            bot.pathfinder.setGoal(objetivo);
 
             return true;
 
@@ -168,23 +164,19 @@ function criarNavegacao(contexto) {
             distancia = 1;
         }
 
-        distancia = Math.max(
-            0,
-            distancia
-        );
+        distancia = Math.max(0, distancia);
 
         if (!inicializar()) {
             return false;
         }
 
         try {
-            const objetivo =
-                new GoalNear(
-                    Math.floor(x),
-                    Math.floor(y),
-                    Math.floor(z),
-                    distancia
-                );
+            const objetivo = new GoalNear(
+                Math.floor(x),
+                Math.floor(y),
+                Math.floor(z),
+                distancia
+            );
 
             destinoAtual = {
                 tipo: "bloco",
@@ -197,9 +189,7 @@ function criarNavegacao(contexto) {
             seguindo = null;
             navegando = true;
 
-            bot.pathfinder.setGoal(
-                objetivo
-            );
+            bot.pathfinder.setGoal(objetivo);
 
             return true;
 
@@ -217,9 +207,7 @@ function criarNavegacao(contexto) {
     }
 
 
-    function encontrarEntidade(
-        identificador
-    ) {
+    function encontrarEntidade(identificador) {
         if (
             identificador === null ||
             identificador === undefined
@@ -227,43 +215,20 @@ function criarNavegacao(contexto) {
             return null;
         }
 
-        if (
-            typeof identificador === "number"
-        ) {
-            return (
-                bot.entities[
-                    identificador
-                ] || null
-            );
+        if (typeof identificador === "number") {
+            return bot.entities[identificador] || null;
         }
 
-        const texto =
-            String(identificador)
-                .toLowerCase();
+        const texto = String(identificador)
+            .toLowerCase();
 
         return (
-            Object.values(
-                bot.entities
-            ).find(entidade => {
+            Object.values(bot.entities).find(entidade => {
                 return (
-                    String(
-                        entidade.id
-                    ) === texto ||
-
-                    String(
-                        entidade.name || ""
-                    ).toLowerCase() ===
-                        texto ||
-
-                    String(
-                        entidade.username || ""
-                    ).toLowerCase() ===
-                        texto ||
-
-                    String(
-                        entidade.displayName || ""
-                    ).toLowerCase() ===
-                        texto
+                    String(entidade.id) === texto ||
+                    String(entidade.name || "").toLowerCase() === texto ||
+                    String(entidade.username || "").toLowerCase() === texto ||
+                    String(entidade.displayName || "").toLowerCase() === texto
                 );
             }) || null
         );
@@ -275,9 +240,7 @@ function criarNavegacao(contexto) {
         distancia = 2
     ) {
         const entidade =
-            encontrarEntidade(
-                identificador
-            );
+            encontrarEntidade(identificador);
 
         if (
             !entidade ||
@@ -290,23 +253,19 @@ function criarNavegacao(contexto) {
             distancia = 2;
         }
 
-        distancia = Math.max(
-            0,
-            distancia
-        );
+        distancia = Math.max(0, distancia);
 
         if (!inicializar()) {
             return false;
         }
 
         try {
-            const objetivo =
-                new GoalNear(
-                    entidade.position.x,
-                    entidade.position.y,
-                    entidade.position.z,
-                    distancia
-                );
+            const objetivo = new GoalNear(
+                entidade.position.x,
+                entidade.position.y,
+                entidade.position.z,
+                distancia
+            );
 
             destinoAtual = {
                 tipo: "entidade",
@@ -321,9 +280,7 @@ function criarNavegacao(contexto) {
             seguindo = null;
             navegando = true;
 
-            bot.pathfinder.setGoal(
-                objetivo
-            );
+            bot.pathfinder.setGoal(objetivo);
 
             return true;
 
@@ -361,9 +318,7 @@ function criarNavegacao(contexto) {
         distancia = 2
     ) {
         const entidade =
-            encontrarEntidade(
-                identificador
-            );
+            encontrarEntidade(identificador);
 
         if (
             !entidade ||
@@ -376,21 +331,17 @@ function criarNavegacao(contexto) {
             distancia = 2;
         }
 
-        distancia = Math.max(
-            0,
-            distancia
-        );
+        distancia = Math.max(0, distancia);
 
         if (!inicializar()) {
             return false;
         }
 
         try {
-            const objetivo =
-                new GoalFollow(
-                    entidade,
-                    distancia
-                );
+            const objetivo = new GoalFollow(
+                entidade,
+                distancia
+            );
 
             seguindo = {
                 id: entidade.id,
@@ -452,12 +403,8 @@ function criarNavegacao(contexto) {
     }
 
 
-    function registrarEventos() {
-        if (!inicializar()) {
-            return false;
-        }
-
-        bot.on(
+ function registrarEventos() {
+    bot.on(
             "goal_reached",
             objetivo => {
                 navegando = false;
@@ -473,15 +420,9 @@ function criarNavegacao(contexto) {
                         {
                             objetivo: objetivo
                                 ? {
-                                    x:
-                                        objetivo.x ??
-                                        null,
-                                    y:
-                                        objetivo.y ??
-                                        null,
-                                    z:
-                                        objetivo.z ??
-                                        null
+                                    x: objetivo.x ?? null,
+                                    y: objetivo.y ?? null,
+                                    z: objetivo.z ?? null
                                 }
                                 : null
                         }
@@ -490,13 +431,13 @@ function criarNavegacao(contexto) {
             }
         );
 
+
         bot.on(
             "path_update",
             resultado => {
                 if (
                     resultado &&
-                    resultado.status ===
-                        "noPath"
+                    resultado.status === "noPath"
                 ) {
                     navegando = false;
 
@@ -507,8 +448,7 @@ function criarNavegacao(contexto) {
                         contexto.enviarEvento(
                             "navegacao_bloqueada",
                             {
-                                destino:
-                                    destinoAtual
+                                destino: destinoAtual
                             }
                         );
                     }
@@ -523,10 +463,8 @@ function criarNavegacao(contexto) {
     function obterEstado() {
         return {
             inicializado,
-            navegando:
-                estaNavegando(),
-            destino:
-                destinoAtual,
+            navegando: estaNavegando(),
+            destino: destinoAtual,
             seguindo
         };
     }

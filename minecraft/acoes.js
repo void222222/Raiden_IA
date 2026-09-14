@@ -79,7 +79,11 @@ function criarAcoes(contexto) {
                     args
                 );
 
-            if (!verificacao?.permitido) {
+            const permitido =
+                verificacao === true ||
+                verificacao?.permitido === true;
+
+            if (!permitido) {
                 return resultado(
                     nomeAcao,
                     false,
