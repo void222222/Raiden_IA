@@ -13,6 +13,7 @@ const { criarCombate } = require("./combate");
 const { criarSeguranca } = require("./seguranca");
 const { criarCrafting } = require("./crafting");
 const { criarConstrucao } = require("./construcao");
+const { criarAutonomia } = require("./autonomia");
 
 
 const MINECRAFT_CONFIG = {
@@ -58,6 +59,7 @@ let combate = null;
 let seguranca = null;
 let crafting = null;
 let construcao = null;
+let autonomia = null;
 
 
 function agora() {
@@ -189,6 +191,13 @@ function criarEstado() {
                 ? construcao.obterEstado()
                 : null,
 
+        autonomia:
+            autonomia &&
+            typeof autonomia.obterEstado ===
+                "function"
+                ? autonomia.obterEstado()
+                : null,
+
         ultimaAcao:
             estadoBot.ultimaAcao,
 
@@ -201,19 +210,41 @@ function criarEstado() {
 }
 
 
+// ============================================================
+// 🎮 RESULTADO DE AÇÃO
+// ============================================================
+//
+// O acao_id agora é propagado de volta para a API.
+//
+// Antes:
+//     registrarResultadoAcao(acao, parametros, resultado)
+//
+// Agora:
+//     registrarResultadoAcao(acao, acaoId, parametros, resultado)
+//
+// E o payload enviado para a Raiden inclui:
+//
+//     "acao_id": acaoId
+//
+// Isso permite que a API associe o resultado
+// à ação pendente correta.
+
 function registrarResultadoAcao(
     acao,
+    acaoId,
     parametros,
     resultado
 ) {
     estadoBot.ultimaAcao = {
         acao,
+        acaoId,
         parametros,
         timestamp: agora()
     };
 
     estadoBot.ultimoResultadoAcao = {
         acao,
+        acaoId,
         resultado,
         timestamp: agora()
     };
@@ -223,6 +254,9 @@ function registrarResultadoAcao(
             "minecraft_acao_resultado",
 
         acao,
+
+        acao_id:
+            acaoId,
 
         sucesso:
             !!resultado?.sucesso,
@@ -234,8 +268,22 @@ function registrarResultadoAcao(
 }
 
 
+// ============================================================
+// 🎮 EXECUTAR AÇÃO
+// ============================================================
+//
+// Antes:
+//     executarAcao(acao, parametros = {})
+//
+// Agora:
+//     executarAcao(acao, acaoId = null, parametros = {})
+//
+// O acaoId é opcional. Quando vier da API,
+// é propagado para registrarResultadoAcao().
+
 async function executarAcao(
     acao,
+    acaoId = null,
     parametros = {}
 ) {
     if (!acoes) {
@@ -256,6 +304,7 @@ async function executarAcao(
 
         registrarResultadoAcao(
             acao,
+            acaoId,
             parametros,
             resultado
         );
@@ -273,6 +322,7 @@ async function executarAcao(
 
         registrarResultadoAcao(
             acao,
+            acaoId,
             parametros,
             resultado
         );
@@ -308,23 +358,59 @@ function processarMensagemRaiden(
             break;
 
 
+        // ====================================================
+        // 🎮 AÇÃO
+        // ====================================================
+        //
+        // Antes:
+        //     executarAcao(
+        //         mensagem.acao,
+        //         mensagem.parametros || {}
+        //     );
+        //
+        // Agora:
+        //     executarAcao(
+        //         mensagem.acao,
+        //         mensagem.acao_id || null,
+        //         mensagem.parametros || {}
+        //     );
+        //
+        // O acao_id é obrigatório para o ciclo
+        // de autonomia funcionar. Sem ele, a ação
+        // pendente nunca é liberada.
+
         case "minecraft_acao":
             executarAcao(
                 mensagem.acao,
+                mensagem.acao_id || null,
                 mensagem.parametros || {}
             );
             break;
 
 
+        // ====================================================
+        // 🛑 CANCELAR AÇÃO
+        // ====================================================
+        //
+        // Cancelamento é uma ação de emergência,
+        // não entra no ciclo de acao_id.
+
         case "cancelar_acao":
             executarAcao(
                 "parar",
+                null,
                 {}
             );
             break;
 
 
         case "parar_tudo":
+            if (autonomia) {
+                autonomia.parar(
+                    "parar_tudo"
+                );
+            }
+
             if (seguranca) {
                 seguranca.pararTudo();
             } else if (movimento) {
@@ -384,6 +470,7 @@ const contexto = {
     seguranca: null,
     crafting: null,
     construcao: null,
+    autonomia: null,
     conexao: null
 };
 
@@ -467,6 +554,15 @@ construcao =
 
 contexto.construcao =
     construcao;
+
+
+autonomia =
+    criarAutonomia(
+        contexto
+    );
+
+contexto.autonomia =
+    autonomia;
 
 
 acoes =
@@ -624,6 +720,21 @@ bot.once(
         }
 
 
+        try {
+            autonomia.iniciar();
+
+            console.log(
+                "🧠 Autonomia da Raiden iniciada."
+            );
+
+        } catch (erro) {
+            console.error(
+                "❌ Erro ao iniciar autonomia:",
+                erro.message
+            );
+        }
+
+
         conexao.conectar();
     }
 );
@@ -652,6 +763,12 @@ bot.on(
 
         estadoBot.conectadoRaiden =
             false;
+
+        try {
+            autonomia.parar(
+                "minecraft_desconectado"
+            );
+        } catch (_) {}
 
         try {
             navegacao.parar();
@@ -691,6 +808,12 @@ function desligar() {
     console.log(
         "\n🛑 Encerrando Raiden Minecraft..."
     );
+
+    try {
+        autonomia.parar(
+            "desligamento"
+        );
+    } catch (_) {}
 
     try {
         seguranca.pararTudo();
@@ -741,6 +864,7 @@ module.exports = {
     seguranca,
     crafting,
     construcao,
+    autonomia,
     conexao,
 
     executarAcao,

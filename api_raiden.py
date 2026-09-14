@@ -24,8 +24,9 @@ import re
 import sys
 import threading
 import queue
+import time
 
-from collections import deque
+from collections import deque, Counter
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -53,8 +54,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-
+from pydantic import BaseModel, Field, field_validator
 
 # ============================================================
 # 3. MÓDULOS DA RAIDEN
@@ -75,6 +75,7 @@ import modulos.youtube as yt_module
 import modulos.frontend as front_module
 import modulos.livepix as pix_module
 import modulos.minecraft as minecraft_module
+import modulos.minecraft_objetivos as minecraft_objetivos_module
 
 
 # ============================================================
@@ -174,6 +175,61 @@ MINECRAFT_TIMEOUT_DECISAO = float(
 )
 
 
+# ------------------------------------------------------------
+# 📊 LOG DE EVENTOS MINECRAFT
+# ------------------------------------------------------------
+#
+# Eventos de percepção em alta frequência continuam sendo
+# recebidos, armazenados e processados normalmente.
+#
+# Eles apenas NÃO geram log individual.
+#
+# Um resumo agregado é impresso a cada X segundos para
+# manter alguma visibilidade sem poluir o terminal.
+
+MINECRAFT_RESUMO_INTERVALO = float(
+    os.getenv(
+        "RAIDEN_MINECRAFT_RESUMO_INTERVALO",
+        "60"
+    )
+)
+
+
+# Eventos considerados "ruído de telemetria".
+# Continuam chegando e sendo guardados.
+# Só não geram log individual.
+
+MINECRAFT_EVENTOS_SILENCIOSOS = {
+
+    "entidade_spawn",
+    "entidade_saiu",
+    "entidade_morreu",
+    "entidade_movimento",
+
+    "animal",
+    "hostile",
+    "water_creature",
+    "passive",
+    "ambient",
+    "mob",
+    "monster",
+    "creature",
+
+    "bloco_atualizado",
+    "bloco_quebrado",
+    "bloco_colocado",
+
+    "som",
+    "particula",
+    "clima",
+
+    "posicao",
+    "rotacao",
+    "velocidade",
+
+}
+
+
 # Evento usado para controlar o loop autônomo.
 
 minecraft_autonomia_evento = (
@@ -234,6 +290,81 @@ class EsquecerMemoriaRequest(BaseModel):
     termo: str
 
     categoria: Optional[str] = None
+
+
+class MinecraftAcaoRequest(BaseModel):
+
+    acao: str
+
+    parametros: dict = Field(
+        default_factory=dict
+    )
+
+
+class MinecraftObjetivoRequest(BaseModel):
+
+    id: str
+
+    nome: str
+
+    descricao: str
+
+    etapas: list[str]
+
+    @field_validator(
+        "id",
+        "nome",
+        "descricao"
+    )
+    @classmethod
+    def _campo_nao_vazio(
+        cls,
+        v: str
+    ) -> str:
+
+        v = v.strip()
+
+        if not v:
+
+            raise ValueError(
+                "campo não pode ser vazio"
+            )
+
+        return v
+
+    @field_validator("etapas")
+    @classmethod
+    def _etapas_validas(
+        cls,
+        v: list[str]
+    ) -> list[str]:
+
+        if not v:
+
+            raise ValueError(
+                "etapas não pode ser vazia"
+            )
+
+        limpas = [
+            etapa.strip()
+            for etapa in v
+            if isinstance(etapa, str)
+            and etapa.strip()
+        ]
+
+        if len(limpas) != len(v):
+
+            raise ValueError(
+                "todas as etapas precisam "
+                "ser textos não vazios"
+            )
+
+        return limpas
+
+
+class MinecraftProgressoRequest(BaseModel):
+
+    progresso: int = Field(ge=0)
 
 
 # ============================================================
@@ -373,12 +504,514 @@ def obter_memoria_pessoal(
 # ⛏ ESTADO DO MINECRAFT
 # ============================================================
 
+minecraft_eventos_recentes = deque(maxlen=50)
+
+
+# ------------------------------------------------------------
+# 📊 CONTADOR AGREGADO DE EVENTOS SILENCIOSOS
+# ------------------------------------------------------------
+
+minecraft_contador_eventos: Counter = Counter()
+
+minecraft_contador_lock = threading.Lock()
+
+minecraft_ultimo_resumo_ts = time.monotonic()
+
+
+def _resumo_eventos_se_passou_intervalo():
+    """
+    Imprime um resumo agregado dos eventos silenciosos
+    se já passou o intervalo configurado.
+
+    Não interfere no armazenamento nem na lógica.
+    """
+
+    global minecraft_ultimo_resumo_ts
+
+    agora = time.monotonic()
+
+    if (
+        agora - minecraft_ultimo_resumo_ts
+        < MINECRAFT_RESUMO_INTERVALO
+    ):
+
+        return
+
+    with minecraft_contador_lock:
+
+        if not minecraft_contador_eventos:
+
+            minecraft_ultimo_resumo_ts = agora
+
+            return
+
+        copia = dict(minecraft_contador_eventos)
+
+        minecraft_contador_eventos.clear()
+
+    minecraft_ultimo_resumo_ts = agora
+
+    total = sum(copia.values())
+
+    detalhes = ", ".join(
+        f"{nome}={qtd}"
+        for nome, qtd
+        in sorted(
+            copia.items(),
+            key=lambda x: -x[1]
+        )[:10]
+    )
+
+    logger.info(
+        "📊 Minecraft (resumo %ss): total=%s | %s",
+        int(MINECRAFT_RESUMO_INTERVALO),
+        total,
+        detalhes
+    )
+
+
 def obter_estado_minecraft() -> dict:
+    """
+    Retorna o estado mais recente conhecido do Minecraft.
+    """
 
     return (
         minecraft_module
         .minecraft_bridge
         .obter_estado()
+    )
+
+
+def obter_objetivo_minecraft() -> dict:
+    """
+    Retorna o objetivo atual da Raiden no Minecraft.
+    """
+
+    try:
+
+        return (
+            minecraft_objetivos_module
+            .minecraft_objetivos
+            .obter_estado()
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ Erro ao obter objetivo Minecraft: {e}"
+        )
+
+        return {}
+
+
+def obter_contexto_objetivo_minecraft() -> str:
+    """
+    Converte o objetivo atual em contexto para o cérebro.
+    """
+
+    try:
+
+        return (
+            minecraft_objetivos_module
+            .minecraft_objetivos
+            .obter_contexto_ia()
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ Erro ao obter contexto do objetivo: {e}"
+        )
+
+        return "Nenhum objetivo definido no momento."
+
+
+def registrar_evento_minecraft(
+    evento: dict
+):
+    """
+    Guarda eventos recentes recebidos do bot.
+
+    O evento não executa inteligência própria.
+    Ele apenas registra o que aconteceu no Minecraft.
+
+    Eventos de telemetria em alta frequência continuam
+    sendo guardados normalmente, mas NÃO geram log
+    individual. Em vez disso, alimentam um contador
+    agregado que é impresso periodicamente.
+
+    ⚠️ IMPORTANTE:
+    O campo "evento" ou "tipo" do payload pode vir
+    como dict/list em alguns casos (por exemplo, se
+    o bot empacotar dados de forma inesperada).
+    Por isso, o nome do evento é SEMPRE normalizado
+    para string antes de ser usado como chave.
+    """
+
+    if not isinstance(evento, dict):
+        return
+
+    minecraft_eventos_recentes.append(evento)
+
+    # --------------------------------------------------------
+    # 🛡️ NORMALIZAÇÃO DO NOME DO EVENTO
+    # --------------------------------------------------------
+    # Garante que nome_evento seja SEMPRE uma string
+    # hashable, mesmo que "evento" ou "tipo" venham
+    # como dict/list/None.
+
+    nome_evento_bruto = (
+        evento.get("evento")
+        or evento.get("tipo")
+        or "desconhecido"
+    )
+
+    if isinstance(
+        nome_evento_bruto,
+        (dict, list)
+    ):
+
+        # ------------------------------------------------
+        # 🔎 DEBUG: mostra exatamente o payload que
+        # trouxe um nome de evento não-hashable.
+        # Isso responde "de onde vem o dict".
+        # ------------------------------------------------
+
+        logger.error(
+            "🔎 DEBUG EVENTO NÃO-HASHABLE | "
+            f"tipo_nome_evento="
+            f"{type(nome_evento_bruto).__name__} | "
+            f"nome_evento_bruto={nome_evento_bruto!r} | "
+            f"payload={evento!r}"
+        )
+
+        try:
+
+            nome_evento_bruto = json.dumps(
+                nome_evento_bruto,
+                ensure_ascii=False,
+                sort_keys=True
+            )
+
+        except (TypeError, ValueError):
+
+            nome_evento_bruto = str(nome_evento_bruto)
+
+    nome_evento = str(nome_evento_bruto)
+
+    # --------------------------------------------------------
+    # Eventos silenciosos: só contam, não logam individual.
+    # --------------------------------------------------------
+
+    if nome_evento in MINECRAFT_EVENTOS_SILENCIOSOS:
+
+        with minecraft_contador_lock:
+
+            minecraft_contador_eventos[
+                nome_evento
+            ] += 1
+
+        _resumo_eventos_se_passou_intervalo()
+
+        return
+
+    # Eventos relevantes continuam sendo logados.
+
+    logger.info(
+        "📡 Minecraft → Raiden | evento=%s",
+        nome_evento
+    )
+
+
+def obter_ultimos_eventos_minecraft() -> list:
+    """
+    Retorna os últimos eventos recebidos.
+    """
+
+    return list(
+        minecraft_eventos_recentes
+    )
+
+
+# ------------------------------------------------------------
+# 🎮 RESULTADO REAL DAS AÇÕES
+# ------------------------------------------------------------
+
+minecraft_resultados_acoes: dict = {}
+
+minecraft_resultados_acoes_lock = (
+    threading.Lock()
+)
+
+minecraft_ultimo_resultado_acao: Optional[dict] = None
+
+
+# ------------------------------------------------------------
+# 🆔 AÇÃO PENDENTE
+# ------------------------------------------------------------
+#
+# Enquanto uma ação está aguardando confirmação do
+# Minecraft, a autonomia NÃO deve disparar outra decisão.
+#
+# Fluxo:
+#   enviar ação → marcar como pendente
+#   receber resultado → limpar pendente
+
+minecraft_acao_pendente_id: Optional[str] = None
+
+minecraft_acao_pendente_lock = (
+    threading.Lock()
+)
+
+
+# ------------------------------------------------------------
+# 🆔 GERADOR DE ID DE AÇÃO
+# ------------------------------------------------------------
+
+def gerar_acao_id_minecraft() -> str:
+    """
+    Gera um identificador único para uma ação
+    enviada ao Minecraft.
+
+    Formato:
+        minecraft-<timestamp_ms>-<sufixo_aleatorio>
+    """
+
+    sufixo = base64.urlsafe_b64encode(
+        os.urandom(6)
+    ).decode("ascii").rstrip("=")
+
+    return (
+        f"minecraft-"
+        f"{int(time.time() * 1000)}-"
+        f"{sufixo}"
+    )
+
+
+# ------------------------------------------------------------
+# 🆔 NORMALIZAÇÃO DE ID
+# ------------------------------------------------------------
+
+def _normalizar_acao_id(acao_id) -> Optional[str]:
+    """
+    Garante que o ID seja uma string hashable.
+
+    Se vier dict/list, converte para JSON.
+    """
+
+    if acao_id is None:
+
+        return None
+
+    if isinstance(acao_id, (dict, list)):
+
+        try:
+
+            acao_id = json.dumps(
+                acao_id,
+                ensure_ascii=False,
+                sort_keys=True
+            )
+
+        except (TypeError, ValueError):
+
+            acao_id = str(acao_id)
+
+    return str(acao_id)
+
+
+# ------------------------------------------------------------
+# 🎮 REGISTRAR RESULTADO DE AÇÃO
+# ------------------------------------------------------------
+
+def registrar_resultado_acao_minecraft(
+    payload: dict
+):
+    """
+    Guarda o resultado real de uma ação enviada
+    pelo bot (via WebSocket).
+
+    Diferente do retorno de bridge.executar_acao(),
+    que só confirma o envio, este payload confirma
+    o que o Minecraft realmente fez.
+
+    Também limpa a ação pendente, se o ID bater.
+    """
+
+    global minecraft_ultimo_resultado_acao
+    global minecraft_acao_pendente_id
+
+    if not isinstance(payload, dict):
+
+        return
+
+    with minecraft_resultados_acoes_lock:
+
+        minecraft_ultimo_resultado_acao = (
+            dict(payload)
+        )
+
+        acao_id_bruto = (
+            payload.get("id")
+            or payload.get("acao_id")
+        )
+
+        # ----------------------------------------------------
+        # 🛡️ BLINDAGEM EXTRA
+        # ----------------------------------------------------
+        # Mesmo com _normalizar_acao_id já protegendo,
+        # garantimos aqui também que a chave do dicionário
+        # seja SEMPRE uma string hashable.
+
+        if isinstance(
+            acao_id_bruto,
+            (dict, list)
+        ):
+
+            try:
+
+                acao_id_bruto = json.dumps(
+                    acao_id_bruto,
+                    ensure_ascii=False,
+                    sort_keys=True
+                )
+
+            except (TypeError, ValueError):
+
+                acao_id_bruto = str(acao_id_bruto)
+
+        acao_id = _normalizar_acao_id(
+            acao_id_bruto
+        )
+
+        if acao_id is not None:
+
+            acao_id = str(acao_id)
+
+            minecraft_resultados_acoes[
+                acao_id
+            ] = dict(payload)
+
+            if len(
+                minecraft_resultados_acoes
+            ) > 50:
+
+                chave_mais_antiga = next(
+                    iter(
+                        minecraft_resultados_acoes
+                    )
+                )
+
+                minecraft_resultados_acoes.pop(
+                    chave_mais_antiga,
+                    None
+                )
+
+    # --------------------------------------------------------
+    # Limpa ação pendente se for a mesma
+    # --------------------------------------------------------
+
+    with minecraft_acao_pendente_lock:
+
+        if (
+            acao_id is not None
+            and minecraft_acao_pendente_id
+            == acao_id
+        ):
+
+            minecraft_acao_pendente_id = None
+
+
+# ------------------------------------------------------------
+# 🆔 PENDÊNCIA
+# ------------------------------------------------------------
+
+def marcar_acao_pendente(acao_id: str):
+
+    global minecraft_acao_pendente_id
+
+    with minecraft_acao_pendente_lock:
+
+        minecraft_acao_pendente_id = (
+            _normalizar_acao_id(acao_id)
+        )
+
+
+def limpar_acao_pendente():
+
+    global minecraft_acao_pendente_id
+
+    with minecraft_acao_pendente_lock:
+
+        minecraft_acao_pendente_id = None
+
+
+def obter_acao_pendente_id() -> Optional[str]:
+
+    with minecraft_acao_pendente_lock:
+
+        return minecraft_acao_pendente_id
+
+
+def existe_acao_pendente() -> bool:
+
+    return obter_acao_pendente_id() is not None
+
+
+# ------------------------------------------------------------
+# 📥 CONSULTA
+# ------------------------------------------------------------
+
+def obter_ultimo_resultado_acao_minecraft(
+) -> Optional[dict]:
+
+    with minecraft_resultados_acoes_lock:
+
+        if minecraft_ultimo_resultado_acao:
+
+            return dict(
+                minecraft_ultimo_resultado_acao
+            )
+
+    return None
+
+
+def obter_resultado_acao_minecraft(
+    acao_id
+) -> Optional[dict]:
+
+    acao_id = _normalizar_acao_id(acao_id)
+
+    if acao_id is None:
+
+        return None
+
+    with minecraft_resultados_acoes_lock:
+
+        resultado = (
+            minecraft_resultados_acoes.get(
+                acao_id
+            )
+        )
+
+        if resultado:
+
+            return dict(resultado)
+
+    return None
+
+
+def _autonomia_esta_rodando() -> bool:
+    """
+    Diz se a tarefa assíncrona da autonomia
+    está realmente viva.
+    """
+
+    tarefa = minecraft_tarefa_autonomia
+
+    return (
+        tarefa is not None
+        and not tarefa.done()
     )
 
 
@@ -431,6 +1064,22 @@ async def pensar_ollama(
             obter_estado_minecraft()
         )
 
+        ultima_acao = (
+            minecraft_module
+            .minecraft_bridge
+            .obter_ultima_acao()
+        )
+
+        ultimo_resultado = (
+            obter_ultimo_resultado_acao_minecraft()
+        )
+
+        ultimo_chat = (
+            minecraft_module
+            .minecraft_bridge
+            .obter_ultima_mensagem_chat()
+        )
+
         bloco_minecraft = (
             "\n\n"
             "ESTADO ATUAL DO MINECRAFT:\n"
@@ -446,6 +1095,12 @@ async def pensar_ollama(
             f"{estado_minecraft.get('inventario')}\n"
             f"Entidades próximas: "
             f"{estado_minecraft.get('entidades')}\n"
+            f"Última ação enviada: "
+            f"{ultima_acao}\n"
+            f"Último resultado real: "
+            f"{ultimo_resultado}\n"
+            f"Último chat recebido: "
+            f"{ultimo_chat}\n"
             "\n"
             "Use o estado do Minecraft quando "
             "ele for relevante. Não invente "
@@ -548,32 +1203,55 @@ async def pensar_acao_minecraft(
 ) -> Optional[dict]:
 
     """
-    Faz o mesmo cérebro da Raiden decidir uma ação
-    Minecraft.
+    Usa o mesmo cérebro Ollama da Raiden para decidir
+    uma única ação Minecraft.
 
-    A resposta precisa ser JSON.
+    A IA nunca executa código.
+    Ela apenas produz JSON.
 
-    Exemplo:
-
-    {
-        "acao": "andar",
-        "direcao": "frente",
-        "duracao": 2
-    }
-
-    ou:
-
-    {
-        "acao": "nenhuma"
-    }
+    Recebe também:
+      - última ação
+      - resultado real
+      - ação pendente (deve estar None)
     """
 
     if not isinstance(
         estado,
         dict
     ):
-
         return None
+
+
+    contexto_objetivo = (
+        obter_contexto_objetivo_minecraft()
+    )
+
+
+    ultima_acao = (
+        minecraft_module
+        .minecraft_bridge
+        .obter_ultima_acao()
+    )
+
+
+    ultimo_resultado = (
+        obter_ultimo_resultado_acao_minecraft()
+    )
+
+
+    acao_pendente = (
+        obter_acao_pendente_id()
+    )
+
+
+    bloco_historico = (
+        "ÚLTIMA AÇÃO ENVIADA:\n"
+        f"{ultima_acao}\n\n"
+        "RESULTADO REAL DA ÚLTIMA AÇÃO:\n"
+        f"{ultimo_resultado}\n\n"
+        "AÇÃO PENDENTE ATUAL:\n"
+        f"{acao_pendente}\n"
+    )
 
 
     prompt = f"""
@@ -581,22 +1259,39 @@ Você é a Raiden jogando Minecraft.
 
 Você é a mesma Raiden que conversa com Lucas.
 Não é uma segunda IA.
-Você deve manter sua personalidade normal.
+Você deve manter sua personalidade normal,
+mas agora está controlando o corpo da Raiden
+dentro do Minecraft.
 
-Sua função agora é observar o estado atual do Minecraft
-e decidir UMA ação simples.
+Sua função é observar o estado atual,
+considerar o objetivo atual, considerar a
+última ação e o último resultado, e escolher
+UMA única ação que realmente faça sentido.
 
-ESTADO ATUAL:
+{contexto_objetivo}
+
+==================================================
+HISTÓRICO DE AÇÕES
+==================================================
+
+{bloco_historico}
+
+==================================================
+ESTADO ATUAL DO MINECRAFT
+==================================================
+
 {json.dumps(
     estado,
     ensure_ascii=False,
     indent=2
 )}
 
-AÇÕES DISPONÍVEIS:
+==================================================
+AÇÕES DISPONÍVEIS
+==================================================
 
 1. andar
-Formato:
+
 {{
   "acao": "andar",
   "direcao": "frente",
@@ -609,87 +1304,147 @@ Direções:
 - esquerda
 - direita
 
-A duração deve ficar entre 0.1 e 5 segundos.
+Duração: 0.1 até 5 segundos.
+
+--------------------------------------------------
 
 2. pular
-{{
-  "acao": "pular"
-}}
+{{ "acao": "pular" }}
+
+--------------------------------------------------
 
 3. parar
-{{
-  "acao": "parar"
-}}
+{{ "acao": "parar" }}
+
+--------------------------------------------------
 
 4. olhar
-Pode olhar para uma posição:
-{{
-  "acao": "olhar",
-  "x": 10,
-  "y": 95,
-  "z": -20
-}}
+{{ "acao": "olhar", "x": 10, "y": 95, "z": -20 }}
 
-5. atacar
-Use somente se existir uma entidade próxima:
-{{
-  "acao": "atacar",
-  "nome": "Zombie"
-}}
+--------------------------------------------------
 
-6. quebrar
-Somente se existir uma posição de bloco conhecida:
-{{
-  "acao": "quebrar",
-  "x": 10,
-  "y": 95,
-  "z": -20
-}}
+5. olhar_direcao
+{{ "acao": "olhar_direcao", "direcao": "cima" }}
 
-7. equipar
-{{
-  "acao": "equipar",
-  "nome": "diamond_sword"
-}}
+--------------------------------------------------
 
-8. usar
-{{
-  "acao": "usar"
-}}
+6. atacar
+{{ "acao": "atacar", "nome": "Zombie" }}
 
-9. dropar
-{{
-  "acao": "dropar",
-  "nome": "dirt",
-  "quantidade": 1
-}}
+--------------------------------------------------
 
-10. chat
-{{
-  "acao": "chat",
-  "mensagem": "Oi, Lucas."
-}}
+7. atacar_proximo
+{{ "acao": "atacar_proximo" }}
 
-11. nenhuma
-Use quando não houver motivo para agir:
-{{
-  "acao": "nenhuma"
-}}
+--------------------------------------------------
 
-REGRAS:
+8. parar_combate
+{{ "acao": "parar_combate" }}
+
+--------------------------------------------------
+
+9. quebrar
+{{ "acao": "quebrar", "x": 10, "y": 95, "z": -20 }}
+
+--------------------------------------------------
+
+10. colocar
+{{ "acao": "colocar", "x": 10, "y": 95, "z": -20, "nome": "dirt" }}
+
+--------------------------------------------------
+
+11. interagir
+{{ "acao": "interagir", "x": 10, "y": 95, "z": -20 }}
+
+--------------------------------------------------
+
+12. usar
+{{ "acao": "usar" }}
+
+--------------------------------------------------
+
+13. equipar
+{{ "acao": "equipar", "nome": "diamond_sword", "destino": "hand" }}
+
+--------------------------------------------------
+
+14. desequipar
+{{ "acao": "desequipar", "destino": "hand" }}
+
+--------------------------------------------------
+
+15. dropar
+{{ "acao": "dropar", "nome": "dirt", "quantidade": 1 }}
+
+--------------------------------------------------
+
+16. ir_para
+{{ "acao": "ir_para", "x": 10, "y": 95, "z": -20 }}
+
+--------------------------------------------------
+
+17. ir_para_bloco
+{{ "acao": "ir_para_bloco", "x": 10, "y": 95, "z": -20 }}
+
+--------------------------------------------------
+
+18. ir_para_entidade
+{{ "acao": "ir_para_entidade", "nome": "Cow" }}
+
+--------------------------------------------------
+
+19. seguir
+{{ "acao": "seguir", "nome": "Lucas" }}
+
+--------------------------------------------------
+
+20. parar_navegacao
+{{ "acao": "parar_navegacao" }}
+
+--------------------------------------------------
+
+21. craftar
+{{ "acao": "craftar", "nome": "crafting_table", "quantidade": 1 }}
+
+--------------------------------------------------
+
+22. construir
+{{ "acao": "construir", "tipo": "abrigo_simples" }}
+
+--------------------------------------------------
+
+23. chat
+{{ "acao": "chat", "mensagem": "Oi, Lucas." }}
+
+--------------------------------------------------
+
+24. nenhuma
+{{ "acao": "nenhuma" }}
+
+==================================================
+REGRAS
+==================================================
 
 - Escolha SOMENTE UMA ação.
+- Retorne SOMENTE JSON válido.
+- Não use Markdown.
+- Não escreva explicações.
 - Não invente entidades.
 - Não invente itens.
 - Não invente coordenadas.
+- Não invente blocos.
 - Não invente informações do mundo.
-- Se houver um inimigo próximo, considere atacá-lo.
-- Se estiver com pouca vida, priorize segurança.
-- Não fique trocando de direção sem motivo.
-- Faça ações simples.
-- Não escreva explicações.
-- NÃO use Markdown.
-- Retorne SOMENTE JSON válido.
+- Considere o objetivo atual como prioridade.
+- Considere o RESULTADO da última ação.
+- Se a última ação FALHOU, NÃO repita a mesma
+  ação sem motivo. Tente outra abordagem.
+- Não execute ações aleatórias.
+- Não fique andando sem motivo.
+- Não ataque entidades inexistentes.
+- Não quebre blocos sem posição conhecida.
+- Se estiver em perigo, priorize segurança.
+- Se estiver com pouca vida, evite ações perigosas.
+- Se não houver ação útil, use "nenhuma".
 """
 
 
@@ -705,11 +1460,11 @@ REGRAS:
 
         "options": {
 
-            "temperature": 0.35,
+            "temperature": 0.25,
 
-            "top_p": 0.85,
+            "top_p": 0.80,
 
-            "num_predict": 120
+            "num_predict": 180
 
         }
 
@@ -740,11 +1495,6 @@ REGRAS:
 
             return None
 
-
-        # ----------------------------------------------------
-        # Tenta encontrar JSON mesmo se o modelo colocar
-        # alguma sujeira ao redor.
-        # ----------------------------------------------------
 
         resposta_limpa = (
             resposta
@@ -784,17 +1534,20 @@ REGRAS:
                 return None
 
 
-            decisao = json.loads(
-                match.group(0)
-            )
+            try:
 
+                decisao = json.loads(
+                    match.group(0)
+                )
 
-        if not isinstance(
-            decisao,
-            dict
-        ):
+            except json.JSONDecodeError:
 
-            return None
+                logger.warning(
+                    "⚠️ JSON Minecraft não pôde "
+                    "ser recuperado."
+                )
+
+                return None
 
 
         return validar_acao_minecraft(
@@ -821,7 +1574,7 @@ REGRAS:
 
 
 # ============================================================
-# ⛏ VALIDAÇÃO DE AÇÃO
+# ⛏ VALIDAÇÃO DE AÇÃO MINECRAFT
 # ============================================================
 
 def validar_acao_minecraft(
@@ -829,17 +1582,16 @@ def validar_acao_minecraft(
 ) -> Optional[dict]:
 
     """
-    Valida a decisão antes de permitir que ela
-    chegue ao Minecraft.
+    Camada de segurança entre o Ollama e o Minecraft.
 
-    O Ollama nunca executa código diretamente.
+    A IA nunca envia uma ação diretamente.
+    Tudo passa por esta validação.
     """
 
     if not isinstance(
         decisao,
         dict
     ):
-
         return None
 
 
@@ -852,7 +1604,6 @@ def validar_acao_minecraft(
         acao,
         str
     ):
-
         return None
 
 
@@ -865,11 +1616,24 @@ def validar_acao_minecraft(
         "pular",
         "parar",
         "olhar",
+        "olhar_direcao",
         "atacar",
+        "atacar_proximo",
+        "parar_combate",
         "quebrar",
-        "equipar",
+        "colocar",
+        "interagir",
         "usar",
+        "equipar",
+        "desequipar",
         "dropar",
+        "ir_para",
+        "ir_para_bloco",
+        "ir_para_entidade",
+        "seguir",
+        "parar_navegacao",
+        "craftar",
+        "construir",
         "chat",
         "nenhuma"
 
@@ -885,6 +1649,8 @@ def validar_acao_minecraft(
         return None
 
 
+    decisao = dict(decisao)
+
     decisao["acao"] = acao
 
 
@@ -894,10 +1660,13 @@ def validar_acao_minecraft(
 
     if acao == "andar":
 
-        direcao = decisao.get(
-            "direcao",
-            "frente"
-        )
+        direcao = str(
+            decisao.get(
+                "direcao",
+                "frente"
+            )
+        ).lower().strip()
+
 
         if direcao not in {
             "frente",
@@ -923,16 +1692,12 @@ def validar_acao_minecraft(
             ValueError
         ):
 
-            duracao = 1
+            return None
 
 
-        duracao = max(
-            0.1,
-            min(
-                duracao,
-                5
-            )
-        )
+        if not 0.1 <= duracao <= 5:
+
+            return None
 
 
         decisao["direcao"] = direcao
@@ -946,23 +1711,53 @@ def validar_acao_minecraft(
 
     elif acao == "olhar":
 
-        if not all(
-            isinstance(
-                decisao.get(c),
+        for coordenada in (
+            "x",
+            "y",
+            "z"
+        ):
+
+            if not isinstance(
+                decisao.get(coordenada),
                 (int, float)
-            )
-            for c in (
-                "x",
-                "y",
-                "z"
-            )
+            ):
+
+                return None
+
+
+    # ========================================================
+    # 🧭 OLHAR DIREÇÃO
+    # ========================================================
+
+    elif acao == "olhar_direcao":
+
+        direcao = decisao.get(
+            "direcao"
+        )
+
+
+        if not isinstance(
+            direcao,
+            str
         ):
 
             return None
 
 
+        if direcao not in {
+            "frente",
+            "tras",
+            "esquerda",
+            "direita",
+            "cima",
+            "baixo"
+        }:
+
+            return None
+
+
     # ========================================================
-    # ⚔️ ATACAR
+    # ⚔️ ATAQUE POR NOME
     # ========================================================
 
     elif acao == "atacar":
@@ -970,6 +1765,7 @@ def validar_acao_minecraft(
         nome = decisao.get(
             "nome"
         )
+
 
         if not isinstance(
             nome,
@@ -987,39 +1783,71 @@ def validar_acao_minecraft(
             return None
 
 
-        decisao["nome"] = nome
+        decisao["nome"] = nome[:100]
 
 
     # ========================================================
-    # ⛏️ QUEBRAR
+    # ⛏️ AÇÕES COM COORDENADAS
     # ========================================================
 
-    elif acao == "quebrar":
+    elif acao in {
+        "quebrar",
+        "colocar",
+        "interagir",
+        "ir_para",
+        "ir_para_bloco"
+    }:
 
-        if not all(
-            isinstance(
-                decisao.get(c),
-                (int, float)
-            )
-            for c in (
-                "x",
-                "y",
-                "z"
-            )
+        for coordenada in (
+            "x",
+            "y",
+            "z"
         ):
 
-            return None
+            if not isinstance(
+                decisao.get(coordenada),
+                (int, float)
+            ):
+
+                return None
+
+
+        if acao == "colocar":
+
+            nome = decisao.get(
+                "nome"
+            )
+
+
+            if not isinstance(
+                nome,
+                str
+            ):
+
+                return None
+
+
+            if not nome.strip():
+
+                return None
+
+
+            decisao["nome"] = nome.strip()[:100]
 
 
     # ========================================================
-    # 🎒 EQUIPAR
+    # 🧭 ENTIDADE
     # ========================================================
 
-    elif acao == "equipar":
+    elif acao in {
+        "ir_para_entidade",
+        "seguir"
+    }:
 
         nome = decisao.get(
             "nome"
         )
+
 
         if not isinstance(
             nome,
@@ -1034,19 +1862,70 @@ def validar_acao_minecraft(
             return None
 
 
-        decisao["nome"] = nome.strip()
+        decisao["nome"] = nome.strip()[:100]
+
+
+    # ========================================================
+    # 🎒 EQUIPAR
+    # ========================================================
+
+    elif acao == "equipar":
+
+        nome = decisao.get(
+            "nome"
+        )
+
+
+        if not isinstance(
+            nome,
+            str
+        ):
+
+            return None
+
+
+        if not nome.strip():
+
+            return None
+
 
         destino = decisao.get(
             "destino",
             "hand"
         )
 
+
         if destino not in {
             "hand",
             "off-hand"
         }:
 
-            destino = "hand"
+            return None
+
+
+        decisao["nome"] = nome.strip()[:100]
+
+        decisao["destino"] = destino
+
+
+    # ========================================================
+    # 🖐️ DESEQUIPAR
+    # ========================================================
+
+    elif acao == "desequipar":
+
+        destino = decisao.get(
+            "destino",
+            "hand"
+        )
+
+
+        if destino not in {
+            "hand",
+            "off-hand"
+        }:
+
+            return None
 
 
         decisao["destino"] = destino
@@ -1062,6 +1941,7 @@ def validar_acao_minecraft(
             "nome"
         )
 
+
         if not isinstance(
             nome,
             str
@@ -1073,9 +1953,6 @@ def validar_acao_minecraft(
         if not nome.strip():
 
             return None
-
-
-        decisao["nome"] = nome.strip()
 
 
         try:
@@ -1092,16 +1969,103 @@ def validar_acao_minecraft(
             ValueError
         ):
 
-            quantidade = 1
+            return None
 
 
-        decisao["quantidade"] = max(
-            1,
-            min(
-                quantidade,
-                64
-            )
+        if not 1 <= quantidade <= 64:
+
+            return None
+
+
+        decisao["nome"] = nome.strip()[:100]
+
+        decisao["quantidade"] = quantidade
+
+
+    # ========================================================
+    # 🔨 CRAFTAR
+    # ========================================================
+
+    elif acao == "craftar":
+
+        nome = decisao.get(
+            "nome"
         )
+
+
+        if not isinstance(
+            nome,
+            str
+        ):
+
+            return None
+
+
+        if not nome.strip():
+
+            return None
+
+
+        try:
+
+            quantidade = int(
+                decisao.get(
+                    "quantidade",
+                    1
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            return None
+
+
+        if not 1 <= quantidade <= 64:
+
+            return None
+
+
+        decisao["nome"] = nome.strip()[:100]
+
+        decisao["quantidade"] = quantidade
+
+
+    # ========================================================
+    # 🏠 CONSTRUIR
+    # ========================================================
+
+    elif acao == "construir":
+
+        tipo = decisao.get(
+            "tipo"
+        )
+
+
+        if not isinstance(
+            tipo,
+            str
+        ):
+
+            return None
+
+
+        tipos_permitidos = {
+            "abrigo_simples",
+            "parede",
+            "piso",
+            "teto"
+        }
+
+
+        if tipo not in tipos_permitidos:
+
+            return None
+
+
+        decisao["tipo"] = tipo
 
 
     # ========================================================
@@ -1113,6 +2077,7 @@ def validar_acao_minecraft(
         mensagem = decisao.get(
             "mensagem"
         )
+
 
         if not isinstance(
             mensagem,
@@ -1135,10 +2100,6 @@ def validar_acao_minecraft(
         )
 
 
-    # ========================================================
-    # 🛑 NENHUMA / PARAR / PULAR
-    # ========================================================
-
     return decisao
 
 
@@ -1148,14 +2109,38 @@ def validar_acao_minecraft(
 
 async def executar_decisao_minecraft(
     decisao: dict
-):
+) -> Optional[str]:
+
+    """
+    Executa uma decisão Minecraft.
+
+    Retorna:
+        str  → acao_id enviada
+        None → nada enviado
+    """
 
     if not decisao:
 
-        return
+        return None
 
 
-    acao = decisao.get(
+    decisao_validada = (
+        validar_acao_minecraft(
+            decisao
+        )
+    )
+
+
+    if decisao_validada is None:
+
+        logger.warning(
+            "⚠️ Decisão Minecraft rejeitada."
+        )
+
+        return None
+
+
+    acao = decisao_validada.get(
         "acao"
     )
 
@@ -1169,7 +2154,7 @@ async def executar_decisao_minecraft(
             "⛏ Raiden decidiu não agir."
         )
 
-        return
+        return None
 
 
     bridge = (
@@ -1180,85 +2165,54 @@ async def executar_decisao_minecraft(
 
     if not bridge.conectado:
 
-        return
+        logger.warning(
+            "⛏ Minecraft não conectado."
+        )
+
+        return None
+
+
+    parametros = {
+        chave: valor
+        for chave, valor
+        in decisao_validada.items()
+        if chave != "acao"
+    }
+
+
+    acao_id = gerar_acao_id_minecraft()
 
 
     logger.info(
-        f"⛏🧠 Raiden decidiu: {decisao}"
+        "⛏🧠 Raiden decidiu: %s | acao_id=%s",
+        decisao_validada,
+        acao_id
     )
 
 
     try:
 
-        if acao == "andar":
+        sucesso = await bridge.executar_acao(
+            acao,
+            acao_id=acao_id,
+            **parametros
+        )
 
-            await bridge.andar(
-                direcao=decisao["direcao"],
-                duracao=decisao["duracao"]
+        if not sucesso:
+
+            logger.warning(
+                "⛏ Falha ao enviar ação %s",
+                acao_id
             )
 
-
-        elif acao == "pular":
-
-            await bridge.pular()
+            return None
 
 
-        elif acao == "parar":
+        # Marca como pendente até o resultado chegar
 
-            await bridge.parar()
+        marcar_acao_pendente(acao_id)
 
-
-        elif acao == "olhar":
-
-            await bridge.olhar(
-                x=decisao["x"],
-                y=decisao["y"],
-                z=decisao["z"]
-            )
-
-
-        elif acao == "atacar":
-
-            await bridge.atacar(
-                nome=decisao["nome"]
-            )
-
-
-        elif acao == "quebrar":
-
-            await bridge.quebrar(
-                x=decisao["x"],
-                y=decisao["y"],
-                z=decisao["z"]
-            )
-
-
-        elif acao == "equipar":
-
-            await bridge.equipar(
-                nome=decisao["nome"],
-                destino=decisao["destino"]
-            )
-
-
-        elif acao == "usar":
-
-            await bridge.usar()
-
-
-        elif acao == "dropar":
-
-            await bridge.dropar(
-                nome=decisao["nome"],
-                quantidade=decisao["quantidade"]
-            )
-
-
-        elif acao == "chat":
-
-            await bridge.falar(
-                decisao["mensagem"]
-            )
+        return acao_id
 
 
     except Exception as e:
@@ -1266,6 +2220,8 @@ async def executar_decisao_minecraft(
         logger.error(
             f"❌ Erro executando ação Minecraft: {e}"
         )
+
+        return None
 
 
 # ============================================================
@@ -1275,9 +2231,24 @@ async def executar_decisao_minecraft(
 async def loop_autonomia_minecraft():
 
     """
-    Loop contínuo da Raiden dentro do Minecraft.
+    Loop:
 
-    Estado → pensamento → ação → espera → estado.
+        percepção
+          ↓
+        objetivo
+          ↓
+        Ollama
+          ↓
+        validação
+          ↓
+        ação
+          ↓
+        aguardar resultado
+          ↓
+        percepção
+
+    Enquanto existir ação pendente,
+    não dispara nova decisão.
     """
 
     logger.info(
@@ -1289,16 +2260,32 @@ async def loop_autonomia_minecraft():
 
         try:
 
-            await minecraft_autonomia_evento.wait()
+            await (
+                minecraft_autonomia_evento
+                .wait()
+            )
 
 
-            if not (
+            bridge = (
                 minecraft_module
                 .minecraft_bridge
-                .conectado
-            ):
+            )
+
+
+            if not bridge.conectado:
 
                 await asyncio.sleep(1)
+
+                continue
+
+
+            # ----------------------------------------------------
+            # ⏸️ Espera ação pendente terminar
+            # ----------------------------------------------------
+
+            if existe_acao_pendente():
+
+                await asyncio.sleep(0.5)
 
                 continue
 
@@ -1317,8 +2304,10 @@ async def loop_autonomia_minecraft():
 
             if decisao:
 
-                await executar_decisao_minecraft(
-                    decisao
+                await (
+                    executar_decisao_minecraft(
+                        decisao
+                    )
                 )
 
 
@@ -1354,9 +2343,36 @@ async def iniciar_autonomia_minecraft():
     global minecraft_tarefa_autonomia
 
 
-    if minecraft_tarefa_autonomia:
+    # Só considera "já iniciada" se a tarefa
+    # estiver REALMENTE viva.
+    #
+    # Se ela morreu por erro inesperado,
+    # permite recriar.
+
+    if (
+        minecraft_tarefa_autonomia is not None
+        and not minecraft_tarefa_autonomia.done()
+    ):
+
+        logger.info(
+            "⛏🤖 Autonomia Minecraft já está "
+            "rodando, ignorando reinício."
+        )
 
         return
+
+
+    # Se existia uma tarefa antiga já finalizada,
+    # limpa referência antes de criar outra.
+
+    if minecraft_tarefa_autonomia is not None:
+
+        logger.warning(
+            "⛏🤖 Tarefa de autonomia anterior "
+            "estava finalizada. Recriando."
+        )
+
+        minecraft_tarefa_autonomia = None
 
 
     if not MINECRAFT_AUTONOMIA_ATIVA:
@@ -1403,7 +2419,9 @@ async def parar_autonomia_minecraft():
 
         try:
 
-            await minecraft_tarefa_autonomia
+            await (
+                minecraft_tarefa_autonomia
+            )
 
         except asyncio.CancelledError:
 
@@ -2067,6 +3085,13 @@ async def lifespan(
 
 
     logger.info(
+        "📊 Resumo de eventos Minecraft: "
+        f"a cada {MINECRAFT_RESUMO_INTERVALO}s "
+        "(eventos de telemetria silenciados)"
+    )
+
+
+    logger.info(
         "✅ Raiden Core iniciado com sucesso."
     )
 
@@ -2129,7 +3154,7 @@ app = FastAPI(
 
     title="Raiden Core API",
 
-    version="2.1.0",
+    version="2.4.0",
 
     lifespan=lifespan
 
@@ -2384,12 +3409,14 @@ async def websocket_minecraft(
     await websocket.accept()
 
 
-    await (
+    bridge = (
         minecraft_module
         .minecraft_bridge
-        .conectar(
-            websocket
-        )
+    )
+
+
+    await bridge.conectar(
+        websocket
     )
 
 
@@ -2402,20 +3429,16 @@ async def websocket_minecraft(
     # Confirma conexão
     # --------------------------------------------------------
 
-    await (
-        minecraft_module
-        .minecraft_bridge
-        .enviar({
+    await bridge.enviar({
 
-            "tipo": "conexao",
+        "tipo": "conexao",
 
-            "status": "ok",
+        "status": "ok",
 
-            "mensagem":
-                "Minecraft conectado à Raiden."
+        "mensagem":
+            "Minecraft conectado à Raiden."
 
-        })
-    )
+    })
 
 
     try:
@@ -2438,19 +3461,15 @@ async def websocket_minecraft(
                 )
 
 
-                await (
-                    minecraft_module
-                    .minecraft_bridge
-                    .enviar({
+                await bridge.enviar({
 
-                        "tipo": "erro",
+                    "tipo": "erro",
 
-                        "mensagem":
-                            "A mensagem precisa "
-                            "ser um objeto JSON."
+                    "mensagem":
+                        "A mensagem precisa "
+                        "ser um objeto JSON."
 
-                    })
-                )
+                })
 
 
                 continue
@@ -2463,20 +3482,30 @@ async def websocket_minecraft(
 
 
             # =================================================
+            # 🚫 ACK — IGNORAR
+            # =================================================
+
+            if tipo == "ack":
+
+                continue
+
+
+            # =================================================
             # 🏓 PING
             # =================================================
 
             if tipo == "ping":
 
-                await (
-                    minecraft_module
-                    .minecraft_bridge
-                    .enviar({
+                await bridge.enviar({
 
-                        "tipo": "pong"
+                    "tipo": "pong",
 
-                    })
-                )
+                    "timestamp":
+                        mensagem.get(
+                            "timestamp"
+                        )
+
+                })
 
                 continue
 
@@ -2487,28 +3516,20 @@ async def websocket_minecraft(
 
             if tipo == "estado":
 
-                minecraft_module \
-                    .minecraft_bridge \
-                    .atualizar_estado(
-                        mensagem
-                    )
-
-
-                await (
-                    minecraft_module
-                    .minecraft_bridge
-                    .enviar({
-
-                        "tipo": "ack",
-
-                        "origem": "raiden",
-
-                        "evento":
-                            "estado_recebido"
-
-                    })
+                bridge.atualizar_estado(
+                    mensagem
                 )
 
+                await bridge.enviar({
+
+                    "tipo": "ack",
+
+                    "origem": "raiden",
+
+                    "evento":
+                        "estado_recebido"
+
+                })
 
                 continue
 
@@ -2522,11 +3543,59 @@ async def websocket_minecraft(
                 "minecraft_acao_resultado"
             ):
 
-                minecraft_module \
-                    .minecraft_bridge \
-                    .registrar_resultado_acao(
-                        mensagem
+                logger.error(
+                    "🔎 DEBUG RESULTADO MINECRAFT | "
+                    f"payload={mensagem!r} | "
+                    f"tipo_acao_id="
+                    f"{type(mensagem.get('acao_id')).__name__} | "
+                    f"tipo_id="
+                    f"{type(mensagem.get('id')).__name__}"
+                )
+
+                acao_id = (
+                    mensagem.get("acao_id")
+                    or mensagem.get("id")
+                )
+
+                acao_id_normalizado = (
+                    _normalizar_acao_id(
+                        acao_id
                     )
+                )
+
+                if acao_id_normalizado is None:
+
+                    logger.warning(
+                        "⚠️ Resultado de ação "
+                        "Minecraft sem acao_id. "
+                        "Não será associado."
+                    )
+
+                else:
+
+                    mensagem["acao_id"] = (
+                        acao_id_normalizado
+                    )
+
+
+                bridge.registrar_resultado_acao(
+                    mensagem
+                )
+
+
+                registrar_resultado_acao_minecraft(
+                    mensagem
+                )
+
+
+                registrar_evento_minecraft({
+
+                    "tipo":
+                        "minecraft_acao_resultado",
+
+                    **mensagem
+
+                })
 
 
                 logger.info(
@@ -2544,17 +3613,34 @@ async def websocket_minecraft(
 
             if tipo == "minecraft_chat":
 
-                minecraft_module \
-                    .minecraft_bridge \
-                    .registrar_chat(
-                        mensagem
-                    )
+                bridge.registrar_chat(
+                    mensagem
+                )
+
+
+                registrar_evento_minecraft(
+                    mensagem
+                )
 
 
                 logger.info(
                     "💬 Minecraft: "
                     f"{mensagem.get('usuario')}: "
                     f"{mensagem.get('mensagem')}"
+                )
+
+
+                continue
+
+
+            # =================================================
+            # 📡 EVENTOS (PERCEPÇÃO / TELEMETRIA)
+            # =================================================
+
+            if tipo == "minecraft_evento":
+
+                registrar_evento_minecraft(
+                    mensagem
                 )
 
 
@@ -2571,23 +3657,19 @@ async def websocket_minecraft(
             )
 
 
-            await (
-                minecraft_module
-                .minecraft_bridge
-                .enviar({
+            await bridge.enviar({
 
-                    "tipo": "ack",
+                "tipo": "ack",
 
-                    "origem": "raiden",
+                "origem": "raiden",
 
-                    "evento":
-                        "mensagem_recebida",
+                "evento":
+                    "mensagem_recebida",
 
-                    "tipo_recebido":
-                        tipo
+                "tipo_recebido":
+                    tipo
 
-                })
-            )
+            })
 
 
     except WebSocketDisconnect:
@@ -2597,20 +3679,16 @@ async def websocket_minecraft(
         )
 
 
-    except Exception as e:
+    except Exception:
 
-        logger.error(
-            f"❌ Erro no WebSocket Minecraft: {e}"
+        logger.exception(
+            "❌ Erro no WebSocket Minecraft"
         )
 
 
     finally:
 
-        await (
-            minecraft_module
-            .minecraft_bridge
-            .desconectar()
-        )
+        await bridge.desconectar()
 
 
         logger.info(
@@ -2636,57 +3714,316 @@ async def minecraft_status():
         "conectado":
             bridge.conectado,
 
+        # Compatibilidade: mantém o campo antigo
         "autonomia":
             MINECRAFT_AUTONOMIA_ATIVA,
+
+        # Novos campos explícitos
+        "autonomia_habilitada":
+            MINECRAFT_AUTONOMIA_ATIVA,
+
+        "autonomia_rodando":
+            _autonomia_esta_rodando(),
+
+        "autonomia_tarefa_existe":
+            minecraft_tarefa_autonomia
+            is not None,
 
         "estado":
             bridge.obter_estado(),
 
+        "objetivo":
+            obter_objetivo_minecraft(),
+
         "ultima_acao":
             bridge.obter_ultima_acao(),
 
+        "ultimo_resultado_acao":
+            obter_ultimo_resultado_acao_minecraft(),
+
         "ultimo_chat":
-            bridge.obter_ultima_mensagem_chat()
+            bridge.obter_ultima_mensagem_chat(),
+
+        # ----------------------------------------------------
+        # 🆕 Ação pendente / última ação rastreável
+        # ----------------------------------------------------
+
+        "acao_pendente":
+            existe_acao_pendente(),
+
+        "acao_pendente_id":
+            obter_acao_pendente_id(),
+
+        "ultima_acao_id":
+            _normalizar_acao_id(
+                (
+                    bridge.obter_ultima_acao()
+                    or {}
+                ).get("acao_id")
+            ),
+
+        "eventos_recentes":
+            obter_ultimos_eventos_minecraft()
 
     }
 
 
 # ============================================================
-# ⛏ CONTROLE MANUAL DA AUTONOMIA
+# ⛏ OBJETIVO ATUAL
 # ============================================================
 
-@app.post("/api/minecraft/autonomia")
-async def minecraft_autonomia(
-    ativa: bool
+@app.get("/api/minecraft/objetivo")
+async def minecraft_objetivo():
+
+    return obter_objetivo_minecraft()
+
+
+@app.post("/api/minecraft/objetivo")
+async def definir_objetivo_minecraft(
+    objetivo: MinecraftObjetivoRequest
 ):
 
-    global MINECRAFT_AUTONOMIA_ATIVA
+    """
+    Define manualmente o objetivo da Raiden.
+    """
+
+    resultado = (
+        minecraft_objetivos_module
+        .minecraft_objetivos
+        .definir_objetivo(
+            id=objetivo.id,
+            nome=objetivo.nome,
+            descricao=objetivo.descricao,
+            etapas=objetivo.etapas
+        )
+    )
 
 
-    MINECRAFT_AUTONOMIA_ATIVA = ativa
-
-
-    if ativa:
-
-        await iniciar_autonomia_minecraft()
-
-        return {
-
-            "status": "ok",
-
-            "autonomia": True
-
+    return {
+        "status": "ok",
+        "objetivo": {
+            "id": resultado.id,
+            "nome": resultado.nome,
+            "descricao": resultado.descricao,
+            "progresso":
+                resultado.progresso,
+            "total":
+                resultado.total,
+            "concluido":
+                resultado.concluido,
+            "etapas":
+                resultado.etapas
         }
+    }
 
 
-    await parar_autonomia_minecraft()
+@app.post("/api/minecraft/objetivo/progresso")
+async def atualizar_progresso_minecraft(
+    progresso: MinecraftProgressoRequest
+):
 
+    (
+        minecraft_objetivos_module
+        .minecraft_objetivos
+        .atualizar_progresso(
+            progresso.progresso
+        )
+    )
+
+
+    return {
+        "status": "ok",
+        "objetivo":
+            obter_objetivo_minecraft()
+    }
+
+
+@app.post("/api/minecraft/objetivo/concluir")
+async def concluir_objetivo_minecraft():
+
+    (
+        minecraft_objetivos_module
+        .minecraft_objetivos
+        .concluir_objetivo()
+    )
+
+
+    return {
+        "status": "ok",
+        "objetivo":
+            obter_objetivo_minecraft()
+    }
+
+
+@app.delete("/api/minecraft/objetivo")
+async def limpar_objetivo_minecraft():
+
+    (
+        minecraft_objetivos_module
+        .minecraft_objetivos
+        .limpar_objetivo()
+    )
+
+
+    return {
+        "status": "ok",
+        "objetivo":
+            obter_objetivo_minecraft()
+    }
+
+
+# ============================================================
+# ⛏ EXECUTAR AÇÃO MANUAL NO MINECRAFT
+# ============================================================
+
+@app.post("/api/minecraft/acao")
+async def minecraft_acao(
+    request: MinecraftAcaoRequest
+):
+
+    bridge = (
+        minecraft_module
+        .minecraft_bridge
+    )
+
+
+    if not bridge.conectado:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Minecraft não está conectado."
+        )
+
+
+    decisao = {
+        "acao":
+            request.acao,
+        **request.parametros
+    }
+
+
+    decisao_validada = (
+        validar_acao_minecraft(
+            decisao
+        )
+    )
+
+
+    if decisao_validada is None:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Ação Minecraft inválida."
+        )
+
+
+    acao = (
+        decisao_validada["acao"]
+    )
+
+
+    parametros = {
+        chave: valor
+        for chave, valor
+        in decisao_validada.items()
+        if chave != "acao"
+    }
+
+
+    acao_id = gerar_acao_id_minecraft()
+
+
+    sucesso_envio = await bridge.executar_acao(
+        acao,
+        acao_id=acao_id,
+        **parametros
+    )
+
+
+    if sucesso_envio:
+
+        marcar_acao_pendente(acao_id)
+
+
+    return {
+
+        "status":
+            "ok"
+            if sucesso_envio
+            else "erro",
+
+        "acao_id":
+            acao_id,
+
+        "acao":
+            decisao_validada,
+
+        "enviada":
+            sucesso_envio,
+
+        "confirmada":
+            False,
+
+        "observacao": (
+            "enviada indica apenas que a ação "
+            "foi entregue ao bridge. O resultado "
+            "real chega via evento "
+            "'minecraft_acao_resultado' no "
+            "WebSocket e pode ser consultado "
+            f"em /api/minecraft/acao/{acao_id}."
+        )
+
+    }
+
+
+# ============================================================
+# ⛏ CONSULTAR RESULTADO DE AÇÃO POR ID
+# ============================================================
+
+@app.get("/api/minecraft/acao/{acao_id}")
+async def consultar_acao_minecraft(
+    acao_id: str
+):
+
+    """
+    Consulta o resultado real de uma ação
+    previamente enviada ao Minecraft.
+    """
+
+    acao_id = _normalizar_acao_id(
+        acao_id
+    )
+
+    if not acao_id:
+
+        raise HTTPException(
+            status_code=400,
+            detail="acao_id obrigatório."
+        )
+
+    resultado = (
+        obter_resultado_acao_minecraft(
+            acao_id
+        )
+    )
+
+    if resultado is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Nenhum resultado registrado "
+                "para esta ação."
+            )
+        )
 
     return {
 
         "status": "ok",
 
-        "autonomia": False
+        "acao_id": acao_id,
+
+        "resultado": resultado
 
     }
 
@@ -2848,7 +4185,6 @@ async def esquecer_memoria(
 
         )
     )
-
 
     if not sucesso:
 

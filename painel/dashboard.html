@@ -1,281 +1,2028 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Painel de Controle - RAIDEN</title>
+
     <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0d0d12;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+
+            margin: 0;
+            padding: 30px;
+
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #9d4edd;
+
+            text-shadow:
+                0 0 10px rgba(157, 78, 221, 0.5);
+
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1100px;
+
+            display: grid;
+
+            grid-template-columns:
+                repeat(auto-fit, minmax(320px, 1fr));
+
+            gap: 20px;
+        }
+
+        .card {
+            background: #1a1a24;
+
+            border: 1px solid #2d2d3f;
+
+            border-radius: 12px;
+
+            padding: 25px;
+
+            box-shadow:
+                0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .card h2 {
+            margin-top: 0;
+
+            color: #fff;
+
+            font-size: 1.2rem;
+
+            border-bottom: 1px solid #2d2d3f;
+
+            padding-bottom: 10px;
+        }
+
         /* ==========================================
-           CONFIGURAÇÕES DE ESTILO (CSS)
+           MINECRAFT
            ========================================== */
-        body { 
-            background-color: #0d0d12; 
-            color: #e0e0e0; 
-            font-family: 'Segoe UI', Tahoma, sans-serif; 
-            margin: 0; 
-            padding: 40px; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
+
+        .minecraft-card {
+            grid-column: 1 / -1;
         }
 
-        h1 { 
-            color: #9d4edd; 
-            text-shadow: 0 0 10px rgba(157, 78, 221, 0.5); 
-            margin-bottom: 5px; 
+        .minecraft-header {
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: center;
+
+            gap: 15px;
         }
 
-        p { 
-            color: #888; 
-            margin-bottom: 30px; 
+        .minecraft-status {
+            padding: 7px 12px;
+
+            border-radius: 20px;
+
+            font-size: 0.8rem;
+
+            font-weight: bold;
+
+            background: #332;
+
+            color: #ffcc00;
         }
 
-        .card { 
-            background: #1a1a24; 
-            border: 1px solid #2d2d3f; 
-            border-radius: 12px; 
-            padding: 25px; 
-            width: 100%; 
-            max-width: 500px; 
-            margin-bottom: 20px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3); 
+        .minecraft-status.online {
+            background: rgba(0, 255, 136, 0.12);
+
+            color: #00ff88;
         }
 
-        .card h2 { 
-            margin-top: 0; 
-            color: #fff; 
-            font-size: 1.2rem; 
+        .minecraft-status.offline {
+            background: rgba(220, 53, 69, 0.15);
+
+            color: #ff5c6c;
         }
 
-        input[type="text"], input[type="file"] { 
-            width: 100%; 
-            padding: 10px; 
-            margin: 10px 0; 
-            background: #0d0d12; 
-            border: 1px solid #3a3a52; 
-            color: #fff; 
-            border-radius: 6px; 
-            box-sizing: border-box; 
+        .minecraft-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(auto-fit, minmax(180px, 1fr));
+
+            gap: 12px;
+
+            margin-top: 20px;
         }
 
-        /* Corzinha do texto no input de arquivo */
+        .minecraft-info {
+            background: #0d0d12;
+
+            border: 1px solid #2d2d3f;
+
+            border-radius: 8px;
+
+            padding: 15px;
+        }
+
+        .minecraft-info-title {
+            color: #888;
+
+            font-size: 0.75rem;
+
+            margin-bottom: 6px;
+
+            text-transform: uppercase;
+        }
+
+        .minecraft-info-value {
+            color: #fff;
+
+            font-size: 1rem;
+
+            font-weight: bold;
+
+            word-break: break-word;
+        }
+
+        .action-box {
+            background: #0d0d12;
+
+            border: 1px solid #7b2cbf;
+
+            border-radius: 8px;
+
+            padding: 15px;
+
+            margin-top: 20px;
+        }
+
+        .action-title {
+            color: #9d4edd;
+
+            font-weight: bold;
+
+            margin-bottom: 8px;
+        }
+
+        .history {
+            margin-top: 20px;
+
+            background: #0d0d12;
+
+            border-radius: 8px;
+
+            border: 1px solid #2d2d3f;
+
+            padding: 10px;
+
+            max-height: 220px;
+
+            overflow-y: auto;
+        }
+
+        .history-item {
+            padding: 8px;
+
+            border-bottom: 1px solid #222230;
+
+            font-size: 0.85rem;
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        .history-time {
+            color: #777;
+
+            margin-right: 8px;
+        }
+
+        .chat-box {
+            margin-top: 20px;
+
+            background: #0d0d12;
+
+            border-radius: 8px;
+
+            border: 1px solid #2d2d3f;
+
+            padding: 15px;
+
+            color: #ccc;
+
+            min-height: 50px;
+        }
+
+        /* ==========================================
+           BOTÕES
+           ========================================== */
+
+        button {
+            background:
+                linear-gradient(
+                    135deg,
+                    #7b2cbf,
+                    #9d4edd
+                );
+
+            color: white;
+
+            border: none;
+
+            padding: 12px 20px;
+
+            width: 100%;
+
+            border-radius: 6px;
+
+            font-weight: bold;
+
+            font-size: 1rem;
+
+            cursor: pointer;
+
+            transition: 0.3s;
+        }
+
+        button:hover {
+            box-shadow:
+                0 0 15px rgba(157, 78, 221, 0.6);
+
+            transform: translateY(-2px);
+        }
+
+        button.danger {
+            background:
+                linear-gradient(
+                    135deg,
+                    #dc3545,
+                    #c82333
+                ) !important;
+        }
+
+        button.minecraft-on {
+            background:
+                linear-gradient(
+                    135deg,
+                    #00a86b,
+                    #00ff88
+                );
+
+            color: #07130e;
+        }
+
+        input[type="text"],
+        input[type="file"] {
+            width: 100%;
+
+            padding: 10px;
+
+            margin: 10px 0;
+
+            background: #0d0d12;
+
+            border: 1px solid #3a3a52;
+
+            color: #fff;
+
+            border-radius: 6px;
+        }
+
         input[type="file"] {
             color: #888;
+
             cursor: pointer;
         }
 
-        button { 
-            background: linear-gradient(135deg, #7b2cbf, #9d4edd); 
-            color: white; 
-            border: none; 
-            padding: 12px 20px; 
-            width: 100%; 
-            border-radius: 6px; 
-            font-weight: bold; 
-            font-size: 1rem; 
-            cursor: pointer; 
-            transition: 0.3s; 
-        }
+        .status {
+            font-size: 0.9rem;
 
-        button:hover { 
-            box-shadow: 0 0 15px rgba(157, 78, 221, 0.6); 
-            transform: translateY(-2px); 
-        }
+            color: #00ff88;
 
-        .status { 
-            font-size: 0.9rem; 
-            color: #00ff88; 
-            margin-top: 10px; 
-            display: none; 
-        }
+            margin-top: 10px;
 
-        .danger { 
-            background: linear-gradient(135deg, #dc3545, #c82333) !important; 
+            display: none;
         }
 
         .description {
             font-size: 0.8rem;
+
             color: #888;
+
             margin-bottom: 10px;
         }
+
+        .empty {
+            color: #666;
+        }
+
+        /* ==========================================
+           CONTROLES MANUAIS DO MINECRAFT
+           ========================================== */
+
+        .minecraft-controles {
+            margin-top: 20px;
+
+            background: #0d0d12;
+
+            border: 1px solid #2d2d3f;
+
+            border-radius: 8px;
+
+            padding: 15px;
+        }
+
+        .minecraft-controles-title {
+            color: #9d4edd;
+
+            font-weight: bold;
+
+            margin-bottom: 12px;
+        }
+
+        .minecraft-controles-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(auto-fit, minmax(140px, 1fr));
+
+            gap: 10px;
+        }
+
+        .minecraft-controles button {
+            width: 100%;
+
+            padding: 10px;
+
+            font-size: 0.9rem;
+        }
+
+        .minecraft-controles button.stop {
+            background:
+                linear-gradient(
+                    135deg,
+                    #dc3545,
+                    #c82333
+                ) !important;
+        }
+
+        .minecraft-controles button.jump {
+            background:
+                linear-gradient(
+                    135deg,
+                    #00a86b,
+                    #00ff88
+                );
+
+            color: #07130e;
+        }
+
+        .minecraft-controles-status {
+            margin-top: 12px;
+
+            color: #888;
+
+            font-size: 0.8rem;
+
+            min-height: 18px;
+        }
+
     </style>
 </head>
+
+
 <body>
 
     <h1>⚡ RAIDEN SYSTEM</h1>
-    <p>Centro de Comando Central</p>
 
-    <!-- CARD: YOUTUBE -->
-    <div class="card">
-        <h2>🔴 Olheiro do YouTube</h2>
-        <input type="text" id="yt-link" placeholder="Cole o link da live aqui...">
-        <button id="btn-yt" onclick="toggleYoutube()">▶️ Injetar Olheiro</button>
-        <div id="yt-status" class="status">✅ Olheiro rodando na live!</div>
+    <div class="subtitle">
+        Centro de Comando Central
     </div>
 
-    <!-- CARD: LIVEPIX -->
-    <div class="card">
-        <h2>💸 Túnel LivePix (Localtunnel)</h2>
-        <button id="btn-pix" onclick="toggleLivepix()">▶️ Abrir Túnel Seguro</button>
-        <div id="pix-status" class="status">🔗 Link: <span id="pix-link"></span></div>
-    </div>
-    
-    <!-- CARD: FRONT-END -->
-    <div class="card">
-        <h2>🎭 VTuber (ChatVRM)</h2>
-        <button id="btn-front" onclick="toggleFrontend()">▶️ Ligar a Raiden (3D)</button>
-        <div id="front-status" class="status">✅ Front-end rodando (Porta 3000)</div>
+
+    <div class="container">
+
+
+        <!-- ==========================================
+             MINECRAFT
+             ========================================== -->
+
+        <div class="card minecraft-card">
+
+            <div class="minecraft-header">
+
+                <h2>⛏️ Raiden no Minecraft</h2>
+
+                <div
+                    id="minecraft-status"
+                    class="minecraft-status"
+                >
+                    🟡 Verificando...
+                </div>
+
+            </div>
+
+
+            <div class="minecraft-grid">
+
+                <div class="minecraft-info">
+
+                    <div class="minecraft-info-title">
+                        🧠 Autonomia
+                    </div>
+
+                    <div
+                        id="minecraft-autonomia"
+                        class="minecraft-info-value"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+
+                <div class="minecraft-info">
+
+                    <div class="minecraft-info-title">
+                        🎮 Última ação
+                    </div>
+
+                    <div
+                        id="minecraft-acao"
+                        class="minecraft-info-value"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+
+                <div class="minecraft-info">
+
+                    <div class="minecraft-info-title">
+                        📍 Posição
+                    </div>
+
+                    <div
+                        id="minecraft-posicao"
+                        class="minecraft-info-value"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+
+                <div class="minecraft-info">
+
+                    <div class="minecraft-info-title">
+                        ❤️ Vida
+                    </div>
+
+                    <div
+                        id="minecraft-vida"
+                        class="minecraft-info-value"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+
+                <div class="minecraft-info">
+
+                    <div class="minecraft-info-title">
+                        🍗 Fome
+                    </div>
+
+                    <div
+                        id="minecraft-fome"
+                        class="minecraft-info-value"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- AÇÃO ATUAL -->
+
+            <div class="action-box">
+
+                <div class="action-title">
+                    🧠 O que a Raiden está fazendo
+                </div>
+
+                <div id="minecraft-acao-detalhes">
+                    Aguardando informações...
+                </div>
+
+            </div>
+
+
+            <!-- CHAT -->
+
+            <div class="chat-box">
+
+                <strong>💬 Último chat:</strong>
+
+                <div id="minecraft-chat">
+                    <span class="empty">
+                        Nenhuma mensagem ainda.
+                    </span>
+                </div>
+
+            </div>
+
+
+            <!-- HISTÓRICO -->
+
+            <div class="history">
+
+                <strong>
+                    📋 Histórico de ações
+                </strong>
+
+                <div id="minecraft-historico">
+
+                    <div class="history-item empty">
+                        Nenhuma ação registrada ainda.
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- AUTONOMIA -->
+
+            <div style="margin-top:20px">
+
+                <button
+                    id="btn-minecraft-autonomia"
+                    onclick="toggleMinecraftAutonomia()"
+                >
+                    ⏳ Verificando autonomia...
+                </button>
+
+            </div>
+
+
+            <!-- ==========================================
+                 CONTROLES MANUAIS
+                 ========================================== -->
+
+            <div class="minecraft-controles">
+
+                <div class="minecraft-controles-title">
+                    🎮 Controle manual da Raiden
+                </div>
+
+
+                <div class="minecraft-controles-grid">
+
+                    <button
+                        onclick="executarAcaoMinecraft(
+                            'andar',
+                            {
+                                direcao: 'frente',
+                                duracao: 1
+                            }
+                        )"
+                    >
+                        ⬆️ Frente
+                    </button>
+
+
+                    <button
+                        onclick="executarAcaoMinecraft(
+                            'andar',
+                            {
+                                direcao: 'tras',
+                                duracao: 1
+                            }
+                        )"
+                    >
+                        ⬇️ Trás
+                    </button>
+
+
+                    <button
+                        onclick="executarAcaoMinecraft(
+                            'andar',
+                            {
+                                direcao: 'esquerda',
+                                duracao: 1
+                            }
+                        )"
+                    >
+                        ⬅️ Esquerda
+                    </button>
+
+
+                    <button
+                        onclick="executarAcaoMinecraft(
+                            'andar',
+                            {
+                                direcao: 'direita',
+                                duracao: 1
+                            }
+                        )"
+                    >
+                        ➡️ Direita
+                    </button>
+
+
+                    <button
+                        class="jump"
+                        onclick="executarAcaoMinecraft(
+                            'pular'
+                        )"
+                    >
+                        🦘 Pular
+                    </button>
+
+
+                    <button
+                        class="stop"
+                        onclick="executarAcaoMinecraft(
+                            'parar'
+                        )"
+                    >
+                        🛑 Parar
+                    </button>
+
+                </div>
+
+
+                <div
+                    id="minecraft-controle-status"
+                    class="minecraft-controles-status"
+                >
+                    Aguardando comando...
+                </div>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- ==========================================
+             YOUTUBE
+             ========================================== -->
+
+        <div class="card">
+
+            <h2>🔴 Olheiro do YouTube</h2>
+
+            <input
+                type="text"
+                id="yt-link"
+                placeholder="Cole o link da live aqui..."
+            >
+
+            <button
+                id="btn-yt"
+                onclick="toggleYoutube()"
+            >
+                ▶️ Injetar Olheiro
+            </button>
+
+            <div
+                id="yt-status"
+                class="status"
+            >
+                ✅ Olheiro rodando na live!
+            </div>
+
+        </div>
+
+
+
+        <!-- ==========================================
+             LIVEPIX
+             ========================================== -->
+
+        <div class="card">
+
+            <h2>💸 Túnel LivePix</h2>
+
+            <button
+                id="btn-pix"
+                onclick="toggleLivepix()"
+            >
+                ▶️ Abrir Túnel Seguro
+            </button>
+
+            <div
+                id="pix-status"
+                class="status"
+            >
+                🔗 Link:
+                <span id="pix-link"></span>
+            </div>
+
+        </div>
+
+
+
+        <!-- ==========================================
+             FRONTEND
+             ========================================== -->
+
+        <div class="card">
+
+            <h2>🎭 VTuber (ChatVRM)</h2>
+
+            <button
+                id="btn-front"
+                onclick="toggleFrontend()"
+            >
+                ▶️ Ligar a Raiden (3D)
+            </button>
+
+            <div
+                id="front-status"
+                class="status"
+            >
+                ✅ Front-end rodando
+            </div>
+
+        </div>
+
+
+
+        <!-- ==========================================
+             GUARDA-ROUPA
+             ========================================== -->
+
+        <div class="card">
+
+            <h2>👗 Guarda-Roupa e Cenário</h2>
+
+            <div class="description">
+                Envie fundos de tela ou Avatares 3D
+                diretamente para o servidor.
+            </div>
+
+            <input
+                type="file"
+                id="arquivo-upload"
+                accept=".png,.jpg,.jpeg,.vrm,.vrma"
+            >
+
+            <button
+                id="btn-upload"
+                onclick="fazerUpload()"
+            >
+                📤 Enviar Arquivo
+            </button>
+
+            <div
+                id="upload-status"
+                class="status"
+            ></div>
+
+        </div>
+
+
+
+        <!-- ==========================================
+             EMERGÊNCIA
+             ========================================== -->
+
+        <div class="card">
+
+            <h2>🛑 Controle de Emergência</h2>
+
+            <button
+                class="danger"
+                onclick="pararTudo()"
+            >
+                Matar Todos os Processos
+            </button>
+
+        </div>
+
     </div>
 
-    <!-- CARD: GUARDA-ROUPA (NOVO!) -->
-    <div class="card">
-        <h2>👗 Guarda-Roupa e Cenário</h2>
-        <div class="description">Envie fundos de tela (.png/.jpg) ou Avatares 3D (.vrm) direto para o servidor.</div>
-        <input type="file" id="arquivo-upload" accept=".png,.jpg,.jpeg,.vrm,.vrma">
-        <button id="btn-upload" onclick="fazerUpload()" style="margin-top: 5px;">📤 Enviar Arquivo</button>
-        <div id="upload-status" class="status"></div>
-    </div>
 
-    <!-- CARD: EMERGÊNCIA -->
-    <div class="card">
-        <h2>🛑 Controle de Emergência</h2>
-        <button class="danger" onclick="pararTudo()">Matar Todos os Processos</button>
-    </div>
 
     <!-- ==========================================
-         LÓGICA JAVASCRIPT
+         JAVASCRIPT
          ========================================== -->
+
     <script>
-        // --- 1. RADAR DE STATUS CONSTANTE ---
-        async function carregarStatus() {
-            try {
-                const res = await fetch("/api/painel/status");
-                const status = await res.json();
-                
-                // Botão YouTube
-                const btnYt = document.getElementById('btn-yt');
-                const statYt = document.getElementById('yt-status');
-                if (status.youtube) {
-                    btnYt.innerText = "🛑 Desligar Olheiro";
-                    btnYt.className = "danger"; 
-                    statYt.style.display = 'block';
-                } else {
-                    btnYt.innerText = "▶️ Injetar Olheiro";
-                    btnYt.className = ""; 
-                    statYt.style.display = 'none';
-                }
 
-                // Botão Front-end
-                const btnFront = document.getElementById('btn-front');
-                const statFront = document.getElementById('front-status');
-                if (status.frontend) {
-                    btnFront.innerText = "🛑 Desligar a Raiden (3D)";
-                    btnFront.className = "danger";
-                    statFront.style.display = 'block';
-                } else {
-                    btnFront.innerText = "▶️ Ligar a Raiden (3D)";
-                    btnFront.className = "";
-                    statFront.style.display = 'none';
-                }
 
-                // Botão LivePix
-                const btnPix = document.getElementById('btn-pix');
-                const statPix = document.getElementById('pix-status');
-                if (status.livepix) {
-                    btnPix.innerText = "🛑 Fechar Túnel Seguro";
-                    btnPix.className = "danger";
-                    statPix.style.display = 'block';
-                } else {
-                    btnPix.innerText = "▶️ Abrir Túnel Seguro";
-                    btnPix.className = "";
-                    statPix.style.display = 'none';
-                }
+        /* ==================================================
+           HISTÓRICO LOCAL DO MINECRAFT
+           ================================================== */
 
-            } catch (e) {
-                console.warn("Radar aguardando a API iniciar...");
-            }
-        }
+        let historicoMinecraft = [];
 
-        // Fica pingando o status a cada 2 segundos
-        setInterval(carregarStatus, 2000);
-        window.onload = carregarStatus;
+        let ultimaAcaoConhecida = null;
 
-        // --- 2. CONTROLES DE BOTÕES ---
-        async function toggleYoutube() {
-            const link = document.getElementById('yt-link').value;
-            await fetch("/api/painel/youtube/toggle", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({link: link})
-            });
-            carregarStatus(); 
-        }
 
-        async function toggleLivepix() {
-            const res = await fetch("/api/painel/livepix/toggle", { method: "POST" });
-            const dados = await res.json();
-            
-            if (dados.status === "ligado") {
-                document.getElementById('pix-link').innerText = dados.url;
-                // Copia a URL automaticamente pro CTRL+C do usuário
-                navigator.clipboard.writeText(dados.url);
-                alert("URL copiada com sucesso! Cole lá no webhook do LivePix.");
-            }
-            carregarStatus();
-        }
+        function registrarAcaoMinecraft(acao) {
 
-        async function toggleFrontend() {
-            await fetch("/api/painel/frontend/toggle", { method: "POST" });
-            carregarStatus(); 
-        }
-
-        async function pararTudo() {
-            await fetch("/api/painel/parar-tudo", { method: "POST" });
-            carregarStatus();
-        }
-
-        // --- 3. SISTEMA DE UPLOAD DE ARQUIVOS (NOVO) ---
-        async function fazerUpload() {
-            const inputArquivo = document.getElementById('arquivo-upload');
-            const divStatus = document.getElementById('upload-status');
-
-            if (inputArquivo.files.length === 0) {
-                alert("Pô mermão, escolhe um arquivo primeiro!");
+            if (!acao) {
                 return;
             }
 
-            const arquivo = inputArquivo.files[0];
-            const formData = new FormData();
-            formData.append("file", arquivo);
+            const agora = new Date();
+
+            const horario =
+                agora.toLocaleTimeString(
+                    'pt-BR',
+                    {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    }
+                );
+
+            historicoMinecraft.unshift({
+                horario: horario,
+                acao: acao
+            });
+
+            /*
+             * Mantém somente as últimas 30 ações.
+             */
+
+            historicoMinecraft =
+                historicoMinecraft.slice(0, 30);
+
+            atualizarHistoricoMinecraft();
+        }
+
+
+        function atualizarHistoricoMinecraft() {
+
+            const elemento =
+                document.getElementById(
+                    "minecraft-historico"
+                );
+
+            if (historicoMinecraft.length === 0) {
+
+                elemento.innerHTML =
+                    '<div class="history-item empty">' +
+                    'Nenhuma ação registrada ainda.' +
+                    '</div>';
+
+                return;
+            }
+
+
+            elemento.innerHTML =
+                historicoMinecraft
+                    .map(item => {
+
+                        return `
+                            <div class="history-item">
+                                <span class="history-time">
+                                    ${item.horario}
+                                </span>
+
+                                🎮 ${item.acao}
+                            </div>
+                        `;
+
+                    })
+                    .join("");
+        }
+
+
+
+        /* ==================================================
+           MINECRAFT
+           ================================================== */
+
+        async function carregarMinecraft() {
 
             try {
-                // UI de Carregamento
-                divStatus.style.display = 'block';
-                divStatus.style.color = '#fff';
-                divStatus.innerText = "⏳ Enviando o pacote pro servidor...";
 
-                const res = await fetch("/api/upload", {
+                const resposta =
+                    await fetch(
+                        "/api/minecraft/status",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+
+                if (!resposta.ok) {
+
+                    throw new Error(
+                        "Falha ao consultar Minecraft"
+                    );
+
+                }
+
+
+                const dados =
+                    await resposta.json();
+
+
+                atualizarPainelMinecraft(dados);
+
+
+            } catch (erro) {
+
+                const status =
+                    document.getElementById(
+                        "minecraft-status"
+                    );
+
+                status.innerText =
+                    "🔴 API indisponível";
+
+                status.className =
+                    "minecraft-status offline";
+            }
+        }
+
+
+
+        function atualizarPainelMinecraft(dados) {
+
+            const conectado =
+                dados.conectado === true;
+
+
+            const status =
+                document.getElementById(
+                    "minecraft-status"
+                );
+
+
+            if (conectado) {
+
+                status.innerText =
+                    "🟢 Minecraft conectado";
+
+                status.className =
+                    "minecraft-status online";
+
+            } else {
+
+                status.innerText =
+                    "🔴 Minecraft desconectado";
+
+                status.className =
+                    "minecraft-status offline";
+            }
+
+
+
+            /* ==========================================
+               AUTONOMIA
+               ========================================== */
+
+            const autonomia =
+                dados.autonomia === true;
+
+
+            document.getElementById(
+                "minecraft-autonomia"
+            ).innerText =
+                autonomia
+                    ? "🟢 Ligada"
+                    : "🔴 Desligada";
+
+
+            const botaoAutonomia =
+                document.getElementById(
+                    "btn-minecraft-autonomia"
+                );
+
+
+            if (autonomia) {
+
+                botaoAutonomia.innerText =
+                    "🛑 Desligar autonomia";
+
+                botaoAutonomia.className =
+                    "danger";
+
+            } else {
+
+                botaoAutonomia.innerText =
+                    "🧠 Ligar autonomia";
+
+                botaoAutonomia.className = "";
+            }
+
+
+
+            /* ==========================================
+               ÚLTIMA AÇÃO
+               ========================================== */
+
+            const ultimaAcao =
+                dados.ultima_acao;
+
+
+            if (ultimaAcao) {
+
+                const textoAcao =
+                    formatarAcaoMinecraft(
+                        ultimaAcao
+                    );
+
+
+                document.getElementById(
+                    "minecraft-acao"
+                ).innerText =
+                    textoAcao;
+
+
+                document.getElementById(
+                    "minecraft-acao-detalhes"
+                ).innerText =
+                    textoAcao;
+
+
+                /*
+                 * Só registra no histórico
+                 * quando a ação realmente mudou.
+                 */
+
+                const chaveAcao =
+                    JSON.stringify(
+                        ultimaAcao
+                    );
+
+
+                if (
+                    chaveAcao !==
+                    ultimaAcaoConhecida
+                ) {
+
+                    ultimaAcaoConhecida =
+                        chaveAcao;
+
+                    registrarAcaoMinecraft(
+                        textoAcao
+                    );
+                }
+
+            } else {
+
+                document.getElementById(
+                    "minecraft-acao"
+                ).innerText = "-";
+
+                document.getElementById(
+                    "minecraft-acao-detalhes"
+                ).innerText =
+                    "Nenhuma ação registrada.";
+            }
+
+
+
+            /* ==========================================
+               ESTADO DO JOGO
+               ========================================== */
+
+            const estado =
+                dados.estado || {};
+
+
+            atualizarEstadoMinecraft(
+                estado
+            );
+
+
+
+            /* ==========================================
+               CHAT
+               ========================================== */
+
+            const chat =
+                dados.ultimo_chat;
+
+
+            if (chat) {
+
+                document.getElementById(
+                    "minecraft-chat"
+                ).innerText =
+                    formatarChatMinecraft(
+                        chat
+                    );
+
+            } else {
+
+                document.getElementById(
+                    "minecraft-chat"
+                ).innerHTML =
+                    '<span class="empty">' +
+                    'Nenhuma mensagem ainda.' +
+                    '</span>';
+            }
+
+        }
+
+
+
+        /* ==================================================
+           ESTADO DO JOGO
+           ================================================== */
+
+        function atualizarEstadoMinecraft(
+            estado
+        ) {
+
+            /*
+             * O bot pode enviar os dados em formatos
+             * diferentes. Por isso tentamos alguns
+             * nomes possíveis.
+             */
+
+
+            const x =
+                pegarValor(
+                    estado,
+                    [
+                        "x",
+                        "posicao.x",
+                        "position.x"
+                    ]
+                );
+
+
+            const y =
+                pegarValor(
+                    estado,
+                    [
+                        "y",
+                        "posicao.y",
+                        "position.y"
+                    ]
+                );
+
+
+            const z =
+                pegarValor(
+                    estado,
+                    [
+                        "z",
+                        "posicao.z",
+                        "position.z"
+                    ]
+                );
+
+
+            if (
+                x !== null &&
+                y !== null &&
+                z !== null
+            ) {
+
+                document.getElementById(
+                    "minecraft-posicao"
+                ).innerText =
+                    `X: ${numero(x)}
+                     Y: ${numero(y)}
+                     Z: ${numero(z)}`;
+
+            } else {
+
+                document.getElementById(
+                    "minecraft-posicao"
+                ).innerText =
+                    "Não informado";
+            }
+
+
+
+            const vida =
+                pegarValor(
+                    estado,
+                    [
+                        "vida",
+                        "health",
+                        "health_points"
+                    ]
+                );
+
+
+            document.getElementById(
+                "minecraft-vida"
+            ).innerText =
+                vida !== null
+                    ? numero(vida)
+                    : "-";
+
+
+
+            const fome =
+                pegarValor(
+                    estado,
+                    [
+                        "fome",
+                        "food",
+                        "food_level"
+                    ]
+                );
+
+
+            document.getElementById(
+                "minecraft-fome"
+            ).innerText =
+                fome !== null
+                    ? numero(fome)
+                    : "-";
+        }
+
+
+
+        /* ==================================================
+           PEGAR VALOR
+           ================================================== */
+
+        function pegarValor(
+            objeto,
+            caminhos
+        ) {
+
+            for (
+                const caminho
+                of caminhos
+            ) {
+
+                const partes =
+                    caminho.split(".");
+
+
+                let atual =
+                    objeto;
+
+
+                let encontrou =
+                    true;
+
+
+                for (
+                    const parte
+                    of partes
+                ) {
+
+                    if (
+                        atual === null ||
+                        atual === undefined ||
+                        !(parte in atual)
+                    ) {
+
+                        encontrou = false;
+
+                        break;
+                    }
+
+
+                    atual =
+                        atual[parte];
+                }
+
+
+                if (
+                    encontrou &&
+                    atual !== null &&
+                    atual !== undefined
+                ) {
+
+                    return atual;
+                }
+            }
+
+
+            return null;
+        }
+
+
+
+        function numero(valor) {
+
+            if (
+                typeof valor === "number"
+            ) {
+
+                return Number(
+                    valor.toFixed(2)
+                );
+            }
+
+            return valor;
+        }
+
+
+
+        /* ==================================================
+           FORMATAR AÇÃO
+           ================================================== */
+
+        function formatarAcaoMinecraft(
+            acao
+        ) {
+
+            if (
+                typeof acao === "string"
+            ) {
+
+                return acao;
+            }
+
+
+            if (!acao) {
+
+                return "Nenhuma";
+            }
+
+
+            const nome =
+                acao.acao ||
+                "ação desconhecida";
+
+
+            const parametros =
+                Object.entries(acao)
+                    .filter(
+                        ([chave]) =>
+                            chave !== "acao"
+                    )
+                    .map(
+                        ([chave, valor]) =>
+                            `${chave}: ${valor}`
+                    )
+                    .join(" | ");
+
+
+            if (!parametros) {
+
+                return nome;
+            }
+
+
+            return `${nome} — ${parametros}`;
+        }
+
+
+
+        /* ==================================================
+           FORMATAR CHAT
+           ================================================== */
+
+        function formatarChatMinecraft(
+            chat
+        ) {
+
+            if (
+                typeof chat === "string"
+            ) {
+
+                return chat;
+            }
+
+
+            if (!chat) {
+
+                return "Nenhuma mensagem.";
+            }
+
+
+            const mensagem =
+                chat.mensagem ||
+                chat.message ||
+                chat.texto ||
+                "";
+
+
+            const jogador =
+                chat.jogador ||
+                chat.username ||
+                chat.nome ||
+                "";
+
+
+            if (
+                jogador &&
+                mensagem
+            ) {
+
+                return `${jogador}: ${mensagem}`;
+            }
+
+
+            return mensagem ||
+                JSON.stringify(chat);
+        }
+
+
+
+        /* ==================================================
+           LIGAR / DESLIGAR AUTONOMIA
+           ================================================== */
+
+        async function toggleMinecraftAutonomia() {
+
+            try {
+
+                const status =
+                    await fetch(
+                        "/api/minecraft/status",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+
+                const dados =
+                    await status.json();
+
+
+                const novaAutonomia =
+                    dados.autonomia !== true;
+
+
+                const resposta =
+                    await fetch(
+                        `/api/minecraft/autonomia?ativa=${novaAutonomia}`,
+                        {
+                            method: "POST"
+                        }
+                    );
+
+
+                if (!resposta.ok) {
+
+                    throw new Error(
+                        "Falha ao alterar autonomia"
+                    );
+                }
+
+
+                await carregarMinecraft();
+
+
+            } catch (erro) {
+
+                alert(
+                    "Não foi possível alterar a autonomia da Raiden."
+                );
+            }
+        }
+
+
+
+        /* ==================================================
+           CONTROLE MANUAL DO MINECRAFT
+           ================================================== */
+
+        async function executarAcaoMinecraft(
+            acao,
+            parametros = {}
+        ) {
+
+            const status =
+                document.getElementById(
+                    "minecraft-controle-status"
+                );
+
+
+            status.innerText =
+                `⏳ Enviando ação: ${acao}...`;
+
+            status.style.color =
+                "#ffcc00";
+
+
+            try {
+
+                const resposta =
+                    await fetch(
+                        "/api/minecraft/acao",
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+
+                                acao: acao,
+
+                                parametros: parametros
+
+                            })
+                        }
+                    );
+
+
+                const dados =
+                    await resposta.json();
+
+
+                if (!resposta.ok) {
+
+                    throw new Error(
+                        dados.detail ||
+                        "Falha ao executar ação."
+                    );
+                }
+
+
+                if (dados.enviada) {
+
+                    status.innerText =
+                        `✅ Ação enviada: ${acao}`;
+
+                    status.style.color =
+                        "#00ff88";
+
+
+                    /*
+                     * Atualiza o painel imediatamente.
+                     */
+
+                    await carregarMinecraft();
+
+                } else {
+
+                    status.innerText =
+                        `❌ A Raiden não executou: ${acao}`;
+
+                    status.style.color =
+                        "#ff5c6c";
+                }
+
+
+            } catch (erro) {
+
+                console.error(
+                    "Erro Minecraft:",
+                    erro
+                );
+
+
+                status.innerText =
+                    `❌ ${erro.message}`;
+
+                status.style.color =
+                    "#ff5c6c";
+            }
+
+
+            /*
+             * Volta para o estado normal
+             * depois de alguns segundos.
+             */
+
+            setTimeout(
+                () => {
+
+                    status.innerText =
+                        "Aguardando comando...";
+
+                    status.style.color =
+                        "#888";
+
+                },
+                3000
+            );
+        }
+
+
+
+        /* ==================================================
+           PAINEL GERAL
+           ================================================== */
+
+        async function carregarStatus() {
+
+            try {
+
+                const res =
+                    await fetch(
+                        "/api/painel/status",
+                        {
+                            cache: "no-store"
+                        }
+                    );
+
+
+                const status =
+                    await res.json();
+
+
+                /* YouTube */
+
+                const btnYt =
+                    document.getElementById(
+                        'btn-yt'
+                    );
+
+                const statYt =
+                    document.getElementById(
+                        'yt-status'
+                    );
+
+
+                if (status.youtube) {
+
+                    btnYt.innerText =
+                        "🛑 Desligar Olheiro";
+
+                    btnYt.className =
+                        "danger";
+
+                    statYt.style.display =
+                        'block';
+
+                } else {
+
+                    btnYt.innerText =
+                        "▶️ Injetar Olheiro";
+
+                    btnYt.className =
+                        "";
+
+                    statYt.style.display =
+                        'none';
+                }
+
+
+
+                /* Front-end */
+
+                const btnFront =
+                    document.getElementById(
+                        'btn-front'
+                    );
+
+                const statFront =
+                    document.getElementById(
+                        'front-status'
+                    );
+
+
+                if (status.frontend) {
+
+                    btnFront.innerText =
+                        "🛑 Desligar a Raiden (3D)";
+
+                    btnFront.className =
+                        "danger";
+
+                    statFront.style.display =
+                        'block';
+
+                } else {
+
+                    btnFront.innerText =
+                        "▶️ Ligar a Raiden (3D)";
+
+                    btnFront.className =
+                        "";
+
+                    statFront.style.display =
+                        'none';
+                }
+
+
+
+                /* LivePix */
+
+                const btnPix =
+                    document.getElementById(
+                        'btn-pix'
+                    );
+
+                const statPix =
+                    document.getElementById(
+                        'pix-status'
+                    );
+
+
+                if (status.livepix) {
+
+                    btnPix.innerText =
+                        "🛑 Fechar Túnel Seguro";
+
+                    btnPix.className =
+                        "danger";
+
+                    statPix.style.display =
+                        'block';
+
+                } else {
+
+                    btnPix.innerText =
+                        "▶️ Abrir Túnel Seguro";
+
+                    btnPix.className =
+                        "";
+
+                    statPix.style.display =
+                        'none';
+                }
+
+
+            } catch (e) {
+
+                console.warn(
+                    "Radar aguardando a API iniciar..."
+                );
+            }
+        }
+
+
+
+        /* ==================================================
+           YOUTUBE
+           ================================================== */
+
+        async function toggleYoutube() {
+
+            const link =
+                document.getElementById(
+                    'yt-link'
+                ).value;
+
+
+            await fetch(
+                "/api/painel/youtube/toggle",
+                {
                     method: "POST",
-                    body: formData
-                });
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        link: link
+                    })
+                }
+            );
+
+
+            carregarStatus();
+        }
+
+
+
+        /* ==================================================
+           LIVEPIX
+           ================================================== */
+
+        async function toggleLivepix() {
+
+            const res =
+                await fetch(
+                    "/api/painel/livepix/toggle",
+                    {
+                        method: "POST"
+                    }
+                );
+
+
+            const dados =
+                await res.json();
+
+
+            if (
+                dados.status === "ligado"
+            ) {
+
+                document.getElementById(
+                    'pix-link'
+                ).innerText =
+                    dados.url;
+
+
+                navigator.clipboard.writeText(
+                    dados.url
+                );
+
+
+                alert(
+                    "URL copiada com sucesso!"
+                );
+            }
+
+
+            carregarStatus();
+        }
+
+
+
+        /* ==================================================
+           FRONTEND
+           ================================================== */
+
+        async function toggleFrontend() {
+
+            await fetch(
+                "/api/painel/frontend/toggle",
+                {
+                    method: "POST"
+                }
+            );
+
+
+            carregarStatus();
+        }
+
+
+
+        /* ==================================================
+           PARAR TUDO
+           ================================================== */
+
+        async function pararTudo() {
+
+            await fetch(
+                "/api/painel/parar-tudo",
+                {
+                    method: "POST"
+                }
+            );
+
+
+            carregarStatus();
+
+            carregarMinecraft();
+        }
+
+
+
+        /* ==================================================
+           UPLOAD
+           ================================================== */
+
+        async function fazerUpload() {
+
+            const inputArquivo =
+                document.getElementById(
+                    'arquivo-upload'
+                );
+
+
+            const divStatus =
+                document.getElementById(
+                    'upload-status'
+                );
+
+
+            if (
+                inputArquivo.files.length === 0
+            ) {
+
+                alert(
+                    "Escolhe um arquivo primeiro!"
+                );
+
+                return;
+            }
+
+
+            const arquivo =
+                inputArquivo.files[0];
+
+
+            const formData =
+                new FormData();
+
+
+            formData.append(
+                "file",
+                arquivo
+            );
+
+
+            try {
+
+                divStatus.style.display =
+                    'block';
+
+                divStatus.style.color =
+                    '#fff';
+
+                divStatus.innerText =
+                    "⏳ Enviando arquivo...";
+
+
+                const res =
+                    await fetch(
+                        "/api/upload",
+                        {
+                            method: "POST",
+
+                            body: formData
+                        }
+                    );
+
 
                 if (res.ok) {
-                    divStatus.style.color = '#00ff88';
-                    divStatus.innerText = "✅ Arquivo salvo com sucesso na pasta public!";
-                    inputArquivo.value = ""; // Limpa a barra de arquivo
+
+                    divStatus.style.color =
+                        '#00ff88';
+
+                    divStatus.innerText =
+                        "✅ Arquivo salvo com sucesso!";
+
+                    inputArquivo.value =
+                        "";
+
                 } else {
-                    divStatus.style.color = '#dc3545';
-                    divStatus.innerText = "❌ Deu ruim no servidor. Verifica a API.";
+
+                    divStatus.style.color =
+                        '#dc3545';
+
+                    divStatus.innerText =
+                        "❌ Erro no servidor.";
                 }
+
+
             } catch (e) {
-                divStatus.style.color = '#dc3545';
-                divStatus.innerText = "❌ A API parece estar desligada.";
+
+                divStatus.style.color =
+                    '#dc3545';
+
+                divStatus.innerText =
+                    "❌ A API parece estar desligada.";
             }
-            
-            // Esconde o aviso depois de 4 segundos
-            setTimeout(() => { divStatus.style.display = 'none'; }, 4000);
+
+
+            setTimeout(
+                () => {
+
+                    divStatus.style.display =
+                        'none';
+
+                },
+                4000
+            );
         }
+
+
+
+        /* ==================================================
+           INICIALIZAÇÃO
+           ================================================== */
+
+        async function atualizarTudo() {
+
+            await carregarStatus();
+
+            await carregarMinecraft();
+        }
+
+
+        /*
+         * Atualiza o painel inteiro
+         * a cada 1 segundo.
+         */
+
+        setInterval(
+            atualizarTudo,
+            1000
+        );
+
+
+        window.onload =
+            atualizarTudo;
+
+
     </script>
 
 </body>
+
 </html>

@@ -12,6 +12,49 @@ Responsabilidades:
 - receber mensagens de chat
 - controlar estado de conexão
 - fornecer uma interface simples para a API
+
+Contrato de ação:
+
+    A API gera um `acao_id` e envia junto com a ação.
+    O Minecraft devolve o MESMO `acao_id` no resultado.
+
+    Isso permite saber exatamente qual execução
+    terminou, especialmente quando várias ações
+    são disparadas em sequência.
+
+Protocolo:
+
+    API
+     ↓
+    minecraft.py
+     ↓
+    {
+        tipo: "minecraft_acao",
+        acao: "andar",
+        acao_id: "abc123",
+        parametros: {
+            direcao: "frente",
+            duracao: 2
+        }
+    }
+     ↓
+    bot.js
+     ↓
+    acoes.executar("andar", { direcao: "frente", duracao: 2 })
+
+Ciclo:
+
+    AÇÃO ENVIADA
+         ↓
+    acao_pendente = ação
+         ↓
+    Minecraft executa
+         ↓
+    resultado com mesmo acao_id
+         ↓
+    ultima_acao = resultado
+         ↓
+    acao_pendente = None
 """
 
 import logging
@@ -72,6 +115,17 @@ class MinecraftBridge:
         # ====================================================
 
         self.ultima_acao: Optional[Dict[str, Any]] = None
+
+
+        # ====================================================
+        # 🆔 CONTROLE DE AÇÃO
+        # ====================================================
+
+        self.ultima_acao_id: Optional[str] = None
+
+        self.acao_pendente: Optional[
+            Dict[str, Any]
+        ] = None
 
 
         # ====================================================
@@ -161,15 +215,25 @@ class MinecraftBridge:
     async def executar_acao(
         self,
         acao: str,
+        acao_id: Optional[str] = None,
         **parametros
     ) -> bool:
         """
         Envia uma ação estruturada para o Minecraft.
 
+        O `acao_id` identifica exclusivamente essa execução,
+        permitindo relacionar a ação enviada ao resultado
+        posteriormente recebido do Minecraft.
+
+        Os parâmetros específicos da ação são agrupados
+        dentro da chave `"parametros"`, mantendo o
+        protocolo alinhado com o `bot.js`.
+
         Exemplo:
 
         await minecraft_bridge.executar_acao(
             "andar",
+            acao_id="abc123",
             direcao="frente",
             duracao=2
         )
@@ -179,8 +243,11 @@ class MinecraftBridge:
         {
             "tipo": "minecraft_acao",
             "acao": "andar",
-            "direcao": "frente",
-            "duracao": 2
+            "acao_id": "abc123",
+            "parametros": {
+                "direcao": "frente",
+                "duracao": 2
+            }
         }
         """
 
@@ -190,7 +257,9 @@ class MinecraftBridge:
 
             "acao": acao,
 
-            **parametros
+            "acao_id": acao_id,
+
+            "parametros": dict(parametros)
 
         }
 
@@ -201,9 +270,34 @@ class MinecraftBridge:
         )
 
 
-        return await self.enviar(
+        enviada = await self.enviar(
             mensagem
         )
+
+
+        if not enviada:
+
+            self.acao_pendente = None
+
+            return False
+
+
+        self.ultima_acao_id = acao_id
+
+        self.acao_pendente = {
+
+            "acao_id": acao_id,
+
+            "acao": acao,
+
+            "parametros": dict(parametros),
+
+            "status": "pendente",
+
+        }
+
+
+        return True
 
 
     # ========================================================
@@ -550,7 +644,17 @@ class MinecraftBridge:
     ):
         """
         Guarda o resultado da última ação executada
-        pelo Minecraft.
+        pelo Minecraft e atualiza o controle da ação
+        pendente.
+
+        Regras:
+
+        - O resultado SÓ é associado à ação pendente
+          se o `acao_id` vier e bater com o ID pendente.
+        - Quando o resultado chega, `acao_pendente`
+          é limpo (`None`).
+        - O resultado continua acessível em
+          `ultima_acao`.
         """
 
         if not isinstance(
@@ -561,7 +665,42 @@ class MinecraftBridge:
             return
 
 
-        self.ultima_acao = resultado
+        self.ultima_acao = dict(
+            resultado
+        )
+
+
+        acao_id = resultado.get(
+            "acao_id"
+        )
+
+
+        if acao_id is not None:
+
+            self.ultima_acao_id = str(
+                acao_id
+            )
+
+
+        if (
+            self.acao_pendente
+            is not None
+        ):
+
+            id_pendente = (
+                self.acao_pendente.get(
+                    "acao_id"
+                )
+            )
+
+
+            if (
+                acao_id is not None
+                and str(acao_id)
+                == str(id_pendente)
+            ):
+
+                self.acao_pendente = None
 
 
         logger.info(
@@ -678,6 +817,35 @@ class MinecraftBridge:
 
 
     # ========================================================
+    # 🆔 OBTER ID DA ÚLTIMA AÇÃO
+    # ========================================================
+
+    def obter_ultima_acao_id(
+        self
+    ) -> Optional[str]:
+
+        return self.ultima_acao_id
+
+
+    # ========================================================
+    # ⏳ OBTER AÇÃO PENDENTE
+    # ========================================================
+
+    def obter_acao_pendente(
+        self
+    ) -> Optional[dict]:
+
+        if self.acao_pendente is None:
+
+            return None
+
+
+        return dict(
+            self.acao_pendente
+        )
+
+
+    # ========================================================
     # 💬 OBTER ÚLTIMO CHAT
     # ========================================================
 
@@ -720,6 +888,12 @@ class MinecraftBridge:
 
             "ultima_acao":
                 self.obter_ultima_acao(),
+
+            "ultima_acao_id":
+                self.obter_ultima_acao_id(),
+
+            "acao_pendente":
+                self.obter_acao_pendente(),
 
             "ultima_mensagem_chat":
                 self.obter_ultima_mensagem_chat(),
