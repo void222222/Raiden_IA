@@ -731,10 +731,20 @@ function criarAutonomia(contexto) {
      *
      * Funciona para qualquer bloco registrado no Minecraft:
      *   oak_log, stone, coal_ore, iron_ore, diamond_ore, ...
+     *
+     * ⚠️ IMPORTANTE:
+     *
+     * A tarefa NÃO é concluída apenas por:
+     *   - navegar até o bloco
+     *   - quebrar um bloco
+     *
+     * A tarefa só é concluída quando o inventário
+     * comprova que a quantidade solicitada foi obtida.
      */
     async function tarefaObterBloco(tarefa) {
         const { bloco, quantidade } = tarefa;
 
+        // Já temos o suficiente?
         if (contarItem(bloco) >= quantidade) {
             return true;
         }
@@ -783,8 +793,16 @@ function criarAutonomia(contexto) {
 
             if (resultado?.sucesso) {
                 invalidarCache();
-                motivo = `${bloco}_coletado`;
-                return true;
+
+                // ⚠️ Só conclui se já temos a quantidade pedida.
+                // Quebrar UM bloco não conclui uma tarefa de 25.
+                if (contarItem(bloco) >= quantidade) {
+                    motivo = `${bloco}_coletado`;
+                    return true;
+                }
+
+                motivo = `coletando_${bloco}`;
+                return false;
             }
 
             motivo = `falha_quebrar_${bloco}`;
@@ -816,9 +834,12 @@ function criarAutonomia(contexto) {
                 return false;
             }
 
+            // ⚠️ Navegar NÃO conclui a tarefa.
+            // Só avança o estado. No próximo ciclo o
+            // handler verifica se o bot já chegou.
             estado = "navegando";
             motivo = `indo_para_${bloco}`;
-            return true;
+            return false;
         }
 
         motivo = "navegacao_indisponivel";
