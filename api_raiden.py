@@ -16,6 +16,11 @@ CENÁRIO C:
     - O autonomia.js dentro do bot executa as etapas
       (minerar, craftar, construir).
     - Ações pontuais do Ollama ainda passam pelo bridge.
+
+⚠️ N4A — ROTAS SIMPLES MOVIDAS:
+    - painel, memória, arquivos → rotas/
+    - Os endpoints foram removidos daqui.
+    - Os routers são registrados no fim do arquivo.
 """
 
 # ============================================================
@@ -23,10 +28,7 @@ CENÁRIO C:
 # ============================================================
 
 import asyncio
-import os
 import queue
-import re
-import sys
 import threading
 
 from pathlib import Path
@@ -43,14 +45,11 @@ import speech_recognition as sr
 from fastapi import (
     FastAPI,
     HTTPException,
-    UploadFile,
-    File,
     WebSocket,
     WebSocketDisconnect
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 
@@ -63,11 +62,7 @@ from nucleo.logger import logger
 from nucleo.config import (
     MICROFONE_ATIVO,
     CORS_ORIGINS,
-    MAX_UPLOAD_SIZE,
-    UPLOAD_CHUNK_SIZE,
-    EXTENSOES_PERMITIDAS,
     PASTA_PUBLIC_CHATVRM,
-    PASTA_PAINEL,
     MINECRAFT_AUTONOMIA_ATIVA,
     MINECRAFT_RESUMO_INTERVALO,
 )
@@ -85,9 +80,6 @@ from nucleo.utils import (
 
 from nucleo.requests import (
     MensagemRequest,
-    YouTubeRequest,
-    MemoriaRequest,
-    EsquecerMemoriaRequest,
     MinecraftAcaoRequest,
     MinecraftObjetivoRequest,
     MinecraftProgressoRequest,
@@ -98,21 +90,14 @@ from nucleo.historico import (
 )
 
 from nucleo.estado_minecraft import (
-    # Eventos
     registrar_evento_autonomia_minecraft,
     registrar_evento_minecraft,
     registrar_resultado_acao_minecraft,
     obter_ultimos_eventos_minecraft,
-
-    # Estado
     obter_estado_autonomia_minecraft,
     obter_objetivo_minecraft,
-
-    # Resultados
     obter_ultimo_resultado_acao_minecraft,
     obter_resultado_acao_minecraft,
-
-    # Pendência
     marcar_acao_pendente,
     obter_acao_pendente_id,
     existe_acao_pendente,
@@ -143,9 +128,6 @@ from nucleo.websocket_minecraft import (
 
 from modulos.web_memoria import (
     iniciar_banco,
-    aprender_memoria_pessoal,
-    esquecer_memoria_pessoal,
-    listar_memorias_pessoais,
 )
 
 import modulos.youtube as yt_module
@@ -153,6 +135,15 @@ import modulos.frontend as front_module
 import modulos.livepix as pix_module
 import modulos.minecraft as minecraft_module
 import modulos.minecraft_objetivos as minecraft_objetivos_module
+
+
+# ============================================================
+# 5. ROTAS (N4A)
+# ============================================================
+
+from rotas.painel import router as painel_router
+from rotas.memoria import router as memoria_router
+from rotas.arquivos import router as arquivos_router
 
 
 # ============================================================
@@ -181,23 +172,16 @@ def escutar_microfone():
         "reyden"
     ]
 
-
     r = sr.Recognizer()
 
-
     r.energy_threshold = 300
-
     r.dynamic_energy_threshold = True
-
     r.pause_threshold = 0.8
-
 
     try:
 
         with calar_linux():
-
             mic = sr.Microphone()
-
 
         with mic as source:
 
@@ -206,12 +190,10 @@ def escutar_microfone():
                 duration=1
             )
 
-
             logger.info(
                 "🎤 Ouvido físico ativado! "
                 "Diga 'Raiden, [sua mensagem]'."
             )
-
 
             while True:
 
@@ -222,7 +204,6 @@ def escutar_microfone():
                         phrase_time_limit=8
                     )
 
-
                     texto = (
                         r.recognize_google(
                             audio,
@@ -231,9 +212,7 @@ def escutar_microfone():
                         .lower()
                     )
 
-
                     gatilho_encontrado = False
-
 
                     for variacao in VARIACOES_RAIDEN:
 
@@ -246,14 +225,10 @@ def escutar_microfone():
 
                             gatilho_encontrado = True
 
-
                     if not gatilho_encontrado:
-
                         continue
 
-
                     comando = texto.strip()
-
 
                     if comando:
 
@@ -261,16 +236,12 @@ def escutar_microfone():
                             f"🎙️ Microfone captou: {comando}"
                         )
 
-
                         fila_perguntas.put(
                             comando
                         )
 
-
                 except sr.UnknownValueError:
-
                     pass
-
 
                 except sr.RequestError as e:
 
@@ -280,7 +251,6 @@ def escutar_microfone():
 
                     continue
 
-
                 except Exception as e:
 
                     logger.debug(
@@ -288,7 +258,6 @@ def escutar_microfone():
                     )
 
                     continue
-
 
     except Exception as e:
 
@@ -314,9 +283,7 @@ async def lifespan(
         "🚀 Inicializando Raiden Core..."
     )
 
-
     iniciar_banco()
-
 
     threading.Thread(
         target=worker_cerebro,
@@ -324,9 +291,7 @@ async def lifespan(
         name="TrabalhadorCerebro"
     ).start()
 
-
     await iniciar_autonomia_minecraft()
-
 
     if MICROFONE_ATIVO:
 
@@ -335,7 +300,6 @@ async def lifespan(
             daemon=True,
             name="OuvidoFisico"
         ).start()
-
 
         logger.info(
             "🎤 Ouvido físico ativado."
@@ -347,23 +311,19 @@ async def lifespan(
             "🎤 Ouvido físico desativado."
         )
 
-
     PASTA_PUBLIC_CHATVRM.mkdir(
         parents=True,
         exist_ok=True
     )
 
-
     logger.info(
         "🎛️ Painel local sem autenticação."
     )
-
 
     logger.info(
         "⛏🤖 Autonomia Minecraft: "
         f"{MINECRAFT_AUTONOMIA_ATIVA}"
     )
-
 
     logger.info(
         "📊 Resumo de eventos Minecraft: "
@@ -371,52 +331,34 @@ async def lifespan(
         "(eventos de telemetria silenciados)"
     )
 
-
     logger.info(
         "✅ Raiden Core iniciado com sucesso."
     )
 
-
     yield
-
 
     logger.info(
         "🛑 Iniciando shutdown da Raiden..."
     )
 
-
     await parar_autonomia_minecraft()
 
-
     try:
-
         yt_module.parar_olheiro()
-
     except Exception:
-
         pass
 
-
     try:
-
         front_module.parar_chatvrm()
-
     except Exception:
-
         pass
-
 
     try:
-
         pix_module.parar_tunel()
-
     except Exception:
-
         pass
-
 
     limpar_historico()
-
 
     logger.info(
         "✅ Shutdown completo."
@@ -458,6 +400,15 @@ app.add_middleware(
 
 
 # ============================================================
+# 🧩 ROUTERS (N4A)
+# ============================================================
+
+app.include_router(painel_router)
+app.include_router(memoria_router)
+app.include_router(arquivos_router)
+
+
+# ============================================================
 # 📁 ARQUIVOS ESTÁTICOS
 # ============================================================
 
@@ -489,7 +440,6 @@ async def chat_endpoint(
         or ""
     ).strip()
 
-
     if not texto:
 
         raise HTTPException(
@@ -497,13 +447,11 @@ async def chat_endpoint(
             detail="Texto vazio!"
         )
 
-
     fila_retorno = (
         queue.Queue(
             maxsize=1
         )
     )
-
 
     fila_perguntas.put(
         (
@@ -511,7 +459,6 @@ async def chat_endpoint(
             fila_retorno
         )
     )
-
 
     try:
 
@@ -521,9 +468,7 @@ async def chat_endpoint(
             60
         )
 
-
         return resposta
-
 
     except queue.Empty:
 
@@ -547,11 +492,9 @@ async def websocket_chat(
 
     await websocket.accept()
 
-
     logger.info(
         "🔌 WebSocket conectado."
     )
-
 
     try:
 
@@ -560,7 +503,6 @@ async def websocket_chat(
             texto = (
                 await websocket.receive_text()
             ).strip()
-
 
             if not texto:
 
@@ -577,11 +519,9 @@ async def websocket_chat(
 
                 continue
 
-
             logger.info(
                 f"🔌 WebSocket recebeu: {texto}"
             )
-
 
             fila_retorno = (
                 queue.Queue(
@@ -589,14 +529,12 @@ async def websocket_chat(
                 )
             )
 
-
             fila_perguntas.put(
                 (
                     texto,
                     fila_retorno
                 )
             )
-
 
             try:
 
@@ -607,7 +545,6 @@ async def websocket_chat(
                         60
                     )
                 )
-
 
             except queue.Empty:
 
@@ -626,16 +563,13 @@ async def websocket_chat(
 
                 continue
 
-
             await websocket.send_json(
                 resposta
             )
 
-
             logger.info(
                 "🔌 Resposta enviada pelo WebSocket."
             )
-
 
     except WebSocketDisconnect:
 
@@ -643,13 +577,11 @@ async def websocket_chat(
             "🔌 WebSocket desconectado."
         )
 
-
     except Exception as e:
 
         logger.error(
             f"❌ Erro no WebSocket: {e}"
         )
-
 
         try:
 
@@ -658,7 +590,6 @@ async def websocket_chat(
             )
 
         except Exception:
-
             pass
 
 
@@ -684,7 +615,6 @@ async def minecraft_status():
         minecraft_module
         .minecraft_bridge
     )
-
 
     return {
 
@@ -766,7 +696,6 @@ async def definir_objetivo_minecraft(
         )
     )
 
-
     return {
         "status": "ok",
         "objetivo": {
@@ -796,7 +725,6 @@ async def atualizar_progresso_minecraft(
         )
     )
 
-
     return {
         "status": "ok",
         "objetivo":
@@ -813,7 +741,6 @@ async def concluir_objetivo_minecraft():
         .concluir_objetivo()
     )
 
-
     return {
         "status": "ok",
         "objetivo":
@@ -829,7 +756,6 @@ async def limpar_objetivo_minecraft():
         .minecraft_objetivos
         .limpar_objetivo()
     )
-
 
     return {
         "status": "ok",
@@ -852,7 +778,6 @@ async def minecraft_acao(
         .minecraft_bridge
     )
 
-
     if not bridge.conectado:
 
         raise HTTPException(
@@ -860,20 +785,17 @@ async def minecraft_acao(
             detail="Minecraft não está conectado."
         )
 
-
     decisao = {
         "acao":
             request.acao,
         **request.parametros
     }
 
-
     decisao_validada = (
         validar_acao_minecraft(
             decisao
         )
     )
-
 
     if decisao_validada is None:
 
@@ -882,11 +804,9 @@ async def minecraft_acao(
             detail="Ação Minecraft inválida."
         )
 
-
     acao = (
         decisao_validada["acao"]
     )
-
 
     parametros = {
         chave: valor
@@ -895,16 +815,13 @@ async def minecraft_acao(
         if chave != "acao"
     }
 
-
     acao_id = gerar_acao_id_minecraft()
-
 
     sucesso_envio = await bridge.executar_acao(
         acao,
         acao_id=acao_id,
         **parametros
     )
-
 
     if sucesso_envio:
 
@@ -915,7 +832,6 @@ async def minecraft_acao(
             "reiniciar_autonomia"
         }:
             marcar_acao_pendente(acao_id)
-
 
     return {
 
@@ -1028,7 +944,6 @@ async def limpar_historico_chat():
 
     limpar_historico()
 
-
     return {
 
         "status": "ok",
@@ -1037,620 +952,6 @@ async def limpar_historico_chat():
             "Histórico limpo!"
 
     }
-
-
-# ============================================================
-# 🧠 MEMÓRIA PESSOAL
-# ============================================================
-
-@app.post("/api/painel/memoria/aprender")
-async def aprender_memoria(
-    req: MemoriaRequest
-):
-
-    termo = req.termo.strip()
-
-    conteudo = req.conteudo.strip()
-
-    categoria = (
-        req.categoria.strip()
-        or "geral"
-    )
-
-
-    if not termo or not conteudo:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Termo e conteúdo "
-                "são obrigatórios."
-            )
-
-        )
-
-
-    sucesso = (
-        aprender_memoria_pessoal(
-
-            termo=termo,
-
-            conteudo=conteudo,
-
-            categoria=categoria
-
-        )
-    )
-
-
-    if not sucesso:
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=(
-                "Não foi possível "
-                "salvar a memória."
-            )
-
-        )
-
-
-    return {
-
-        "status": "ok",
-
-        "mensagem":
-            "Memória aprendida.",
-
-        "termo": termo,
-
-        "categoria": categoria
-
-    }
-
-
-@app.get("/api/painel/memoria")
-async def listar_memoria():
-
-    return {
-
-        "memorias":
-            listar_memorias_pessoais()
-
-    }
-
-
-@app.delete("/api/painel/memoria")
-async def esquecer_memoria(
-    req: EsquecerMemoriaRequest
-):
-
-    termo = req.termo.strip()
-
-
-    if not termo:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail="Termo obrigatório."
-
-        )
-
-
-    sucesso = (
-        esquecer_memoria_pessoal(
-
-            termo=termo,
-
-            categoria=req.categoria
-
-        )
-    )
-
-    if not sucesso:
-
-        raise HTTPException(
-
-            status_code=404,
-
-            detail="Memória não encontrada."
-
-        )
-
-
-    return {
-
-        "status": "ok",
-
-        "mensagem":
-            "Memória esquecida."
-
-    }
-
-
-# ============================================================
-# 🎛️ PAINEL
-# ============================================================
-
-@app.get("/api/painel/status")
-async def painel_status():
-
-    return {
-
-        "youtube":
-            yt_module.olheiro_ativo,
-
-        "frontend": (
-            front_module
-            .processo_frontend
-            is not None
-        ),
-
-        "livepix": (
-            pix_module
-            .processo_tunel
-            is not None
-        ),
-
-        "minecraft": (
-            minecraft_module
-            .minecraft_bridge
-            .conectado
-        ),
-
-        "minecraft_autonomia":
-            MINECRAFT_AUTONOMIA_ATIVA
-
-    }
-
-
-# ============================================================
-# 🎥 YOUTUBE
-# ============================================================
-
-@app.post("/api/painel/youtube/toggle")
-async def toggle_youtube(
-    req: YouTubeRequest = None
-):
-
-    if yt_module.olheiro_ativo:
-
-        yt_module.parar_olheiro()
-
-        return {
-            "status": "desligado"
-        }
-
-
-    if not req or not req.link:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Coloque o link da live "
-                "para ligar!"
-            )
-
-        )
-
-
-    sucesso = (
-        yt_module.iniciar_olheiro(
-            req.link,
-            callback_youtube
-        )
-    )
-
-
-    if sucesso:
-
-        return {
-            "status": "ligado"
-        }
-
-
-    raise HTTPException(
-
-        status_code=400,
-
-        detail=(
-            "Erro ao conectar no YouTube."
-        )
-
-    )
-
-
-# ============================================================
-# 🎛 FRONTEND
-# ============================================================
-
-@app.post("/api/painel/frontend/toggle")
-async def toggle_frontend():
-
-    if (
-        front_module
-        .processo_frontend
-        is not None
-    ):
-
-        front_module.parar_chatvrm()
-
-        return {
-            "status": "desligado"
-        }
-
-
-    sucesso = (
-        front_module
-        .ligar_chatvrm()
-    )
-
-
-    if sucesso:
-
-        return {
-            "status": "ligado"
-        }
-
-
-    raise HTTPException(
-
-        status_code=500,
-
-        detail=(
-            "Erro ao iniciar "
-            "o Front-end."
-        )
-
-    )
-
-
-# ============================================================
-# 💰 LIVEPIX
-# ============================================================
-
-@app.post("/api/painel/livepix/toggle")
-async def toggle_livepix():
-
-    if (
-        pix_module
-        .processo_tunel
-        is not None
-    ):
-
-        pix_module.parar_tunel()
-
-        return {
-            "status": "desligado"
-        }
-
-
-    resultado = (
-        pix_module
-        .ligar_tunel()
-    )
-
-
-    if resultado["status"] == "ok":
-
-        return {
-
-            "status": "ligado",
-
-            "url":
-                resultado["url"]
-
-        }
-
-
-    raise HTTPException(
-
-        status_code=500,
-
-        detail=resultado["detail"]
-
-    )
-
-
-# ============================================================
-# 🛑 PARAR TUDO
-# ============================================================
-
-@app.post("/api/painel/parar-tudo")
-async def painel_parar():
-
-    yt_module.parar_olheiro()
-
-    front_module.parar_chatvrm()
-
-    pix_module.parar_tunel()
-
-
-    logger.info(
-        "🛑 Comando de emergência: "
-        "Tudo parado."
-    )
-
-
-    return {
-        "status": "ok"
-    }
-
-
-# ============================================================
-# 📺 PAINEL WEB
-# ============================================================
-
-@app.get("/painel")
-async def abrir_painel():
-
-    return FileResponse(
-        PASTA_PAINEL
-        / "dashboard.html"
-    )
-
-
-# ============================================================
-# 👗 GESTÃO DE ARQUIVOS
-# ============================================================
-
-@app.get("/api/arquivos")
-async def listar_arquivos():
-
-    modelos = []
-
-    animacoes = []
-
-    fundos = []
-
-
-    try:
-
-        for arquivo in os.listdir(
-            PASTA_PUBLIC_CHATVRM
-        ):
-
-            caminho = (
-                PASTA_PUBLIC_CHATVRM
-                / arquivo
-            )
-
-
-            if not caminho.is_file():
-
-                continue
-
-
-            if arquivo.lower().endswith(
-                ".vrm"
-            ):
-
-                modelos.append(
-                    arquivo
-                )
-
-
-            elif arquivo.lower().endswith(
-                ".vrma"
-            ):
-
-                animacoes.append(
-                    arquivo
-                )
-
-
-            elif arquivo.lower().endswith(
-                (
-                    ".png",
-                    ".jpg",
-                    ".jpeg"
-                )
-            ):
-
-                fundos.append(
-                    arquivo
-                )
-
-
-        return {
-
-            "modelos": modelos,
-
-            "animacoes": animacoes,
-
-            "fundos": fundos
-
-        }
-
-
-    except Exception as e:
-
-        logger.error(
-            f"❌ Erro ao listar arquivos: {e}"
-        )
-
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=(
-                "Erro ao listar arquivos."
-            )
-
-        )
-
-
-# ============================================================
-# 📤 UPLOAD
-# ============================================================
-
-@app.post("/api/upload")
-async def upload_arquivo(
-    file: UploadFile = File(...)
-):
-
-    nome_arquivo = Path(
-        file.filename or ""
-    ).name
-
-
-    if not nome_arquivo:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Nome de arquivo inválido."
-            )
-
-        )
-
-
-    extensao = (
-        Path(nome_arquivo)
-        .suffix
-        .lower()
-    )
-
-
-    if extensao not in EXTENSOES_PERMITIDAS:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Tipo de arquivo não permitido. "
-                "Use VRM, VRMA, PNG ou JPG."
-            )
-
-        )
-
-
-    caminho_salvar = (
-        PASTA_PUBLIC_CHATVRM
-        / nome_arquivo
-    )
-
-
-    try:
-
-        caminho_salvar.resolve().relative_to(
-            PASTA_PUBLIC_CHATVRM.resolve()
-        )
-
-
-    except ValueError:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Caminho de arquivo inválido."
-            )
-
-        )
-
-
-    try:
-
-        tamanho_total = 0
-
-        conteudo = bytearray()
-
-
-        while True:
-
-            chunk = await file.read(
-                UPLOAD_CHUNK_SIZE
-            )
-
-
-            if not chunk:
-
-                break
-
-
-            tamanho_total += len(
-                chunk
-            )
-
-
-            if tamanho_total > MAX_UPLOAD_SIZE:
-
-                raise HTTPException(
-
-                    status_code=413,
-
-                    detail=(
-                        "Arquivo muito grande! "
-                        "Máximo: 10MB"
-                    )
-
-                )
-
-
-            conteudo.extend(
-                chunk
-            )
-
-
-        caminho_salvar.write_bytes(
-            conteudo
-        )
-
-
-        logger.info(
-            f"📥 Arquivo salvo: "
-            f"{nome_arquivo} "
-            f"({tamanho_total} bytes)"
-        )
-
-
-        return {
-
-            "status": "ok",
-
-            "arquivo": nome_arquivo,
-
-            "tamanho": tamanho_total
-
-        }
-
-
-    except HTTPException:
-
-        raise
-
-
-    except Exception as e:
-
-        logger.error(
-            f"❌ Erro ao salvar arquivo "
-            f"{nome_arquivo}: {e}"
-        )
-
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=(
-                "Erro ao salvar arquivo."
-            )
-
-        )
 
 
 # ============================================================
@@ -1664,12 +965,10 @@ if __name__ == "__main__":
         "na porta 8000..."
     )
 
-
     logger.info(
         "🌐 Host: 127.0.0.1 "
         "(somente este computador)"
     )
-
 
     uvicorn.run(
 
