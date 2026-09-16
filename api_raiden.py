@@ -689,9 +689,23 @@ def registrar_evento_autonomia_minecraft(
 
     if nome == "minecraft_autonomia_perigo":
 
+        perigos = evento.get("perigos") or []
+        criticos = evento.get("criticos") or []
+
+        # Pega o primeiro perigo pra logar de forma útil
+        primeiro = (criticos or perigos or [{}])[0]
+
+        tipo = primeiro.get("tipo") or "?"
+        nome_perigo = primeiro.get("nome") or "?"
+        distancia = primeiro.get("distancia")
+
         logger.warning(
-            "⛏🤖 Perigo detectado pela autonomia: %s",
-            evento.get("objetivo")
+            "⛏🤖 Perigo detectado | tipo=%s nome=%s dist=%s | total=%d criticos=%d",
+            tipo,
+            nome_perigo,
+            distancia,
+            len(perigos),
+            len(criticos)
         )
 
         return

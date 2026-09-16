@@ -15,17 +15,90 @@ const { criarCrafting } = require("./crafting");
 const { criarConstrucao } = require("./construcao");
 const { criarAutonomia } = require("./autonomia");
 
+// ============================================================
+// 🧪 DEBUG DO SISTEMA DE CRAFTING
+// ============================================================
+
+const DEBUG_CRAFTING = false;
+
+// ============================================================
+// 👁️ VIEWER — CONFIG (FASE 4)
+// ============================================================
+//
+// ⚠️ DIAGNÓSTICO DO PROBLEMA DE CÂMERA:
+//
+// Sintomas:
+//   - Monstros não aparecem de forma normal
+//   - Folhas e algumas texturas ficam esquisitas
+//   - No Minecraft real (você olhando), tá normal
+//
+// Causa provável:
+//   1. viewDistance muito baixa (8) → chunks distantes
+//      não carregam no viewer, folhas renderizam errado,
+//      monstros distantes somem
+//   2. firstPerson: true → a câmera vê pelas costas do
+//      bot e pode bugar com o modelo dele
+//   3. Versão do prismarine-viewer desatualizada em
+//      relação ao protocolo do servidor
+//
+// Correção aplicada:
+//   - viewDistance: 8 → 16
+//   - firstPerson: false (câmera de fora, mais estável)
+//   - fallback: se o viewer falhar, loga e continua sem
+//
+// ⚠️ NOVO: CÂMERA EM 3ª PESSOA DE VERDADE
+//
+// Antes, o `prismarine-viewer` mostrava o mundo pelo
+// ponto de vista do bot, mas com o modelo dele atrapalhando.
+//
+// Agora, usamos `viewer.control` + `viewer.track` pra:
+//   - Câmera orbitando ao redor do bot (3ª pessoa)
+//   - Mouse pra rotacionar
+//   - WASD pra mover a câmera (sem mexer no bot)
+//   - Scroll pra zoom
+//
+// Se ainda ficar bugado, as alternativas são:
+//   A) Rodar `npm install prismarine-viewer@latest`
+//   B) Usar `mineflayer-web-inventory` + câmera própria
+//   C) Rodar um cliente Minecraft real em spectator mode
+//      na conta da Raiden (mais fiel, mais setup)
+
+const VIEWER_CONFIG = {
+    porta: 3007,
+
+    // ⚠️ 3ª pessoa de verdade
+    //   false = câmera ORBITANDO ao redor do bot (3ª pessoa)
+    //   true  = primeira pessoa (buga com modelo do bot)
+    primeiraPessoa: false,
+
+    // 16 = 2x o padrão. Corrige folhas e monstros distantes.
+    distanciaVisao: 16,
+
+    // ⚠️ Câmera orbitando
+    //   true  = câmera segue o bot automaticamente (3ª pessoa)
+    //   false = câmera fixa (você controla manualmente)
+    seguirBot: true,
+
+    // ⚠️ Offset da câmera em relação ao bot
+    //   x = esquerda/direita
+    //   y = altura (cima/baixo)
+    //   z = frente/trás
+    offsetCamera: {
+        x: 0,
+        y: 3,
+        z: -5
+    },
+
+    // Liga/desliga o viewer inteiro.
+    // Se true e falhar, o bot continua rodando sem viewer.
+    ativo: true
+};
+
 const MINECRAFT_CONFIG = {
     host: "127.0.0.1",
     port: 25565,
     username: "Raiden",
     version: false
-};
-
-const VIEWER_CONFIG = {
-    porta: 3007,
-    primeiraPessoa: true,
-    distanciaVisao: 8
 };
 
 const bot = mineflayer.createBot(MINECRAFT_CONFIG);
@@ -37,7 +110,10 @@ const estadoBot = {
     ultimaAcao: null,
     ultimoResultadoAcao: null,
     ultimoChat: null,
-    viewerIniciado: false
+    viewerIniciado: false,
+
+    inventarioInicial: null,
+    inventarioInicialEm: null
 };
 
 let conexao = null;
@@ -54,8 +130,19 @@ let crafting = null;
 let construcao = null;
 let autonomia = null;
 
+let timerMorte = null;
+
 function agora() {
     return new Date().toISOString();
+}
+
+function cancelarTimerMorte() {
+    if (timerMorte) {
+        clearTimeout(timerMorte);
+        timerMorte = null;
+        return true;
+    }
+    return false;
 }
 
 function enviarMensagemRaiden(mensagem) {
@@ -102,21 +189,202 @@ function chat(mensagem) {
 }
 
 // ============================================================
-// 🧪 DIAGNÓSTICO DO MINECRAFT / CRAFTING
+// 👁️ VIEWER — INICIALIZAÇÃO (FASE 4)
 // ============================================================
 //
-// Este diagnóstico é temporário.
+// ⚠️ 3ª pessoa de verdade
 //
-// Objetivo:
-// descobrir por que:
-//     bot.registry.itemsByName.oak_planks
-// existe,
-// mas:
-//     bot.recipesFor(oak_planks.id)
-// retorna 0 receitas.
-//
-// Não altera a lógica do bot.
-// Apenas imprime informações no terminal.
+// Além de iniciar o viewer, agora:
+//   1. Chama `viewer.control` pra habilitar mouse + WASD
+//   2. Chama `viewer.track` pra câmera seguir o bot
+//   3. Loga instruções de uso
+
+function iniciarViewer() {
+    if (!VIEWER_CONFIG.ativo) {
+        console.log(
+            "👁️ Viewer DESLIGADO (VIEWER_CONFIG.ativo = false)."
+        );
+        return false;
+    }
+
+    if (estadoBot.viewerIniciado) {
+        return true;
+    }
+
+    try {
+        // 1. Inicia o viewer
+        viewer(bot, {
+            port: VIEWER_CONFIG.porta,
+            firstPerson: VIEWER_CONFIG.primeiraPessoa,
+            viewDistance: VIEWER_CONFIG.distanciaVisao
+        });
+
+        estadoBot.viewerIniciado = true;
+
+        console.log(
+            `👁️ Viewer iniciado em ` +
+            `http://127.0.0.1:${VIEWER_CONFIG.porta} ` +
+            `(viewDistance=${VIEWER_CONFIG.distanciaVisao}, ` +
+            `firstPerson=${VIEWER_CONFIG.primeiraPessoa})`
+        );
+
+        // 2. ⚠️ 3ª pessoa de verdade
+        //    Espera um pouco pra câmera inicializar, depois
+        //    ativa o modo "seguir o bot" com offset.
+        setTimeout(() => {
+            try {
+                const viewerModule =
+                    require("prismarine-viewer");
+
+                // Tenta ativar o controle (mouse + WASD)
+                if (
+                    viewerModule &&
+                    viewerModule.mineflayer &&
+                    typeof viewerModule.mineflayer.control === "function"
+                ) {
+                    try {
+                        viewerModule.mineflayer.control(bot);
+                        console.log(
+                            "🎥 Controles ativados (mouse + WASD)"
+                        );
+                    } catch (_) {}
+                }
+
+                // Tenta ativar o track (câmera segue o bot)
+                if (
+                    viewerModule &&
+                    typeof viewerModule.track === "function"
+                ) {
+                    viewerModule.track(
+                        bot,
+                        bot.entity,
+                        {
+                            y: VIEWER_CONFIG.offsetCamera.y,
+                            z: VIEWER_CONFIG.offsetCamera.z,
+                            x: VIEWER_CONFIG.offsetCamera.x
+                        }
+                    );
+
+                    console.log(
+                        `🎥 Câmera em 3ª pessoa ` +
+                        `(offset: y=${VIEWER_CONFIG.offsetCamera.y}, ` +
+                        `z=${VIEWER_CONFIG.offsetCamera.z})`
+                    );
+                } else {
+                    console.log(
+                        "⚠️ viewer.track não disponível. " +
+                        "Câmera padrão."
+                    );
+                }
+            } catch (erro) {
+                console.error(
+                    "⚠️ Erro ao ativar 3ª pessoa:",
+                    erro.message
+                );
+            }
+        }, 2000);
+
+        // 3. Log de instruções
+        console.log("");
+        console.log("🎥 INSTRUÇÕES DA CÂMERA:");
+        console.log("   - Mouse: rotaciona");
+        console.log("   - WASD: move a câmera (sem mexer no bot)");
+        console.log("   - Scroll: zoom");
+        console.log("   - Q/E: sobe/desce");
+        console.log("   - Botão direito: órbita ao redor do bot");
+        console.log("");
+
+        return true;
+
+    } catch (erro) {
+        console.error(
+            "❌ Erro ao iniciar viewer:",
+            erro.message
+        );
+
+        console.error(
+            "⚠️ Bot vai continuar SEM viewer. " +
+            "Pra corrigir:"
+        );
+
+        console.error(
+            "   1. npm install prismarine-viewer@latest"
+        );
+
+        console.error(
+            "   2. Ou mude VIEWER_CONFIG.ativo = false"
+        );
+
+        estadoBot.viewerIniciado = false;
+        return false;
+    }
+}
+
+// ============================================================
+// 🎒 INVENTÁRIO
+// ============================================================
+
+function lerInventarioAtual() {
+    if (
+        !inventario ||
+        typeof inventario.obterItens !== "function"
+    ) {
+        return null;
+    }
+
+    try {
+        const itens = inventario.obterItens() || [];
+
+        const agrupado = {};
+
+        for (const item of itens) {
+            if (!item?.nome) continue;
+
+            const nome = item.nome;
+            const qtd = Number(item.quantidade || 0);
+
+            if (!agrupado[nome]) {
+                agrupado[nome] = 0;
+            }
+
+            agrupado[nome] += qtd;
+        }
+
+        return agrupado;
+
+    } catch (erro) {
+        console.error(
+            "🎒 Erro ao ler inventário:",
+            erro.message
+        );
+
+        return null;
+    }
+}
+
+function logarInventario(inventarioObj, contexto = "entrou com") {
+    if (
+        !inventarioObj ||
+        Object.keys(inventarioObj).length === 0
+    ) {
+        console.log(
+            `🎒 Raiden ${contexto} SEM itens no inventário.`
+        );
+
+        return;
+    }
+
+    const lista = Object.entries(inventarioObj)
+        .map(([nome, qtd]) => `${nome} x${qtd}`)
+        .join(", ");
+
+    console.log(
+        `🎒 Raiden ${contexto}: ${lista}`
+    );
+}
+
+// ============================================================
+// 🧪 DIAGNÓSTICO DO MINECRAFT / CRAFTING
 // ============================================================
 
 function diagnosticarReceitasMinecraft() {
@@ -125,102 +393,34 @@ function diagnosticarReceitasMinecraft() {
     console.log("🧪 DIAGNÓSTICO DO SISTEMA DE CRAFTING");
     console.log("════════════════════════════════════════════");
 
-    // --------------------------------------------------------
-    // 🎮 VERSÃO
-    // --------------------------------------------------------
-
-    console.log(
-        "🧪 Versão Minecraft:",
-        bot.version
-    );
-
-    console.log(
-        "🧪 Versão do protocolo:",
-        bot.protocolVersion
-    );
-
-    console.log(
-        "🧪 Registry disponível:",
-        !!bot.registry
-    );
+    console.log("🧪 Versão Minecraft:", bot.version);
+    console.log("🧪 Versão do protocolo:", bot.protocolVersion);
+    console.log("🧪 Registry disponível:", !!bot.registry);
 
     if (!bot.registry) {
         console.error(
             "❌ Registry do Minecraft ainda não está disponível."
         );
-
         console.log(
             "════════════════════════════════════════════"
         );
-
         return;
     }
 
-    // --------------------------------------------------------
-    // 📦 REGISTRY
-    // --------------------------------------------------------
+    const oakLog = bot.registry.itemsByName.oak_log;
+    const oakPlanks = bot.registry.itemsByName.oak_planks;
+    const craftingTable = bot.registry.itemsByName.crafting_table;
 
-    const oakLog =
-        bot.registry.itemsByName.oak_log;
-
-    const oakPlanks =
-        bot.registry.itemsByName.oak_planks;
-
-    const craftingTable =
-        bot.registry.itemsByName.crafting_table;
-
-    console.log(
-        "🧪 oak_log:",
-        oakLog
-    );
-
-    console.log(
-        "🧪 oak_planks:",
-        oakPlanks
-    );
-
-    console.log(
-        "🧪 crafting_table:",
-        craftingTable
-    );
-
-    // --------------------------------------------------------
-    // 🌳 OAK LOG
-    // --------------------------------------------------------
+    console.log("🧪 oak_log:", oakLog);
+    console.log("🧪 oak_planks:", oakPlanks);
+    console.log("🧪 crafting_table:", craftingTable);
 
     if (oakLog) {
         try {
             const receitasLog =
-                bot.recipesFor(
-                    oakLog.id,
-                    null,
-                    1,
-                    null
-                );
-
+                bot.recipesFor(oakLog.id, null, 1, null);
             console.log(
                 `🧪 oak_log → ${receitasLog.length} receita(s)`
-            );
-
-            receitasLog.forEach(
-                (receita, index) => {
-                    console.log(
-                        `🧪 Receita oak_log #${index + 1}:`,
-                        {
-                            requiresTable:
-                                receita.requiresTable,
-
-                            result:
-                                receita.result,
-
-                            delta:
-                                receita.delta,
-
-                            ingredients:
-                                receita.ingredients
-                        }
-                    );
-                }
             );
         } catch (erro) {
             console.error(
@@ -228,68 +428,17 @@ function diagnosticarReceitasMinecraft() {
                 erro
             );
         }
-    } else {
-        console.warn(
-            "⚠️ oak_log não existe no registry."
-        );
     }
 
-    // --------------------------------------------------------
-    // 🪵 OAK PLANKS
-    // --------------------------------------------------------
-
     if (!oakPlanks) {
-        console.error(
-            "❌ oak_planks NÃO existe no registry."
-        );
+        console.error("❌ oak_planks NÃO existe no registry.");
     } else {
         try {
             const receitasPlanks =
-                bot.recipesFor(
-                    oakPlanks.id,
-                    null,
-                    1,
-                    null
-                );
-
+                bot.recipesFor(oakPlanks.id, null, 1, null);
             console.log(
                 `🧪 oak_planks → ${receitasPlanks.length} receita(s)`
             );
-
-            receitasPlanks.forEach(
-                (receita, index) => {
-                    console.log(
-                        `🧪 Receita oak_planks #${index + 1}:`,
-                        {
-                            requiresTable:
-                                receita.requiresTable,
-
-                            result:
-                                receita.result,
-
-                            delta:
-                                receita.delta,
-
-                            ingredients:
-                                receita.ingredients
-                        }
-                    );
-                }
-            );
-
-            if (receitasPlanks.length === 0) {
-                console.error("");
-                console.error(
-                    "❌ PROBLEMA CONFIRMADO:"
-                );
-                console.error(
-                    "❌ oak_planks existe no registry,"
-                );
-                console.error(
-                    "❌ mas bot.recipesFor() retornou ZERO receitas."
-                );
-                console.error("");
-            }
         } catch (erro) {
             console.error(
                 "❌ Erro testando receita de oak_planks:",
@@ -298,38 +447,18 @@ function diagnosticarReceitasMinecraft() {
         }
     }
 
-    // --------------------------------------------------------
-    // 🪑 CRAFTING TABLE
-    // --------------------------------------------------------
-
     if (craftingTable) {
-        console.log(
-            "🧪 crafting_table ID:",
-            craftingTable.id
-        );
-    } else {
-        console.warn(
-            "⚠️ crafting_table não existe no registry."
-        );
+        console.log("🧪 crafting_table ID:", craftingTable.id);
     }
-
-    // --------------------------------------------------------
-    // 📚 INFORMAÇÕES DO REGISTRY
-    // --------------------------------------------------------
 
     try {
         console.log(
             "🧪 Número de itens no registry:",
-            Object.keys(
-                bot.registry.itemsByName || {}
-            ).length
+            Object.keys(bot.registry.itemsByName || {}).length
         );
-
         console.log(
             "🧪 Número de blocos no registry:",
-            Object.keys(
-                bot.registry.blocksByName || {}
-            ).length
+            Object.keys(bot.registry.blocksByName || {}).length
         );
     } catch (erro) {
         console.warn(
@@ -354,14 +483,9 @@ function criarEstado() {
     return {
         ...estadoPercepcao,
 
-        conectadoMinecraft:
-            estadoBot.conectadoMinecraft,
-
-        conectadoRaiden:
-            estadoBot.conectadoRaiden,
-
-        ultimaAtualizacaoEstado:
-            estadoBot.ultimaAtualizacaoEstado,
+        conectadoMinecraft: estadoBot.conectadoMinecraft,
+        conectadoRaiden: estadoBot.conectadoRaiden,
+        ultimaAtualizacaoEstado: estadoBot.ultimaAtualizacaoEstado,
 
         movimento:
             movimento &&
@@ -411,14 +535,12 @@ function criarEstado() {
                 ? autonomia.obterEstado()
                 : null,
 
-        ultimaAcao:
-            estadoBot.ultimaAcao,
+        ultimaAcao: estadoBot.ultimaAcao,
+        ultimoResultadoAcao: estadoBot.ultimoResultadoAcao,
+        ultimoChat: estadoBot.ultimoChat,
 
-        ultimoResultadoAcao:
-            estadoBot.ultimoResultadoAcao,
-
-        ultimoChat:
-            estadoBot.ultimoChat
+        inventarioInicial: estadoBot.inventarioInicial,
+        inventarioInicialEm: estadoBot.inventarioInicialEm
     };
 }
 
@@ -451,17 +573,11 @@ function registrarResultadoAcao(
 
     enviarMensagemRaiden({
         tipo: "minecraft_acao_resultado",
-
         acao,
-
         acao_id: acaoId,
-
         origem,
-
         sucesso: !!resultado?.sucesso,
-
         resultado,
-
         timestamp: agora()
     });
 }
@@ -480,8 +596,7 @@ async function executarAcao(
         const resultado = {
             sucesso: false,
             acao,
-            erro:
-                "Sistema de ações ainda não inicializado."
+            erro: "Sistema de ações ainda não inicializado."
         };
 
         registrarResultadoAcao(
@@ -497,10 +612,7 @@ async function executarAcao(
 
     try {
         const resultado =
-            await acoes.executar(
-                acao,
-                parametros
-            );
+            await acoes.executar(acao, parametros);
 
         registrarResultadoAcao(
             acao,
@@ -515,9 +627,7 @@ async function executarAcao(
         const resultado = {
             sucesso: false,
             acao,
-            erro:
-                erro?.message ||
-                String(erro)
+            erro: erro?.message || String(erro)
         };
 
         registrarResultadoAcao(
@@ -570,7 +680,10 @@ async function processarControleAutonomia(
                         nome: parametros.nome,
                         descricao: parametros.descricao,
                         etapa: parametros.etapa,
-                        etapas: parametros.etapas
+                        etapas: parametros.etapas,
+                        itens_necessarios:
+                            parametros.itens_necessarios,
+                        construir: parametros.construir
                     });
 
                 resultado = {
@@ -612,6 +725,8 @@ async function processarControleAutonomia(
             }
 
             case "reiniciar_autonomia": {
+                cancelarTimerMorte();
+
                 const reiniciou = autonomia.reiniciar();
 
                 resultado = {
@@ -685,9 +800,7 @@ function processarMensagemRaiden(mensagem) {
             break;
 
         case "minecraft_acao": {
-            const acao = String(
-                mensagem.acao || ""
-            )
+            const acao = String(mensagem.acao || "")
                 .trim()
                 .toLowerCase();
 
@@ -718,12 +831,7 @@ function processarMensagemRaiden(mensagem) {
         }
 
         case "cancelar_acao":
-            executarAcao(
-                "parar",
-                null,
-                {},
-                "sistema"
-            );
+            executarAcao("parar", null, {}, "sistema");
             break;
 
         case "parar_tudo":
@@ -769,17 +877,11 @@ async function executarAcaoDaAutonomia(
 
 const contexto = {
     bot,
-
     config: MINECRAFT_CONFIG,
-
     estado: estadoBot,
-
     enviarMensagem: enviarMensagemRaiden,
-
     enviarEvento,
-
     criarEstado,
-
     executarAcaoPublica: executarAcaoDaAutonomia,
 
     percepcao: null,
@@ -846,9 +948,7 @@ conexao.definirCallback(
     () => {
         estadoBot.conectadoRaiden = true;
 
-        console.log(
-            "🧠 Conectado ao cérebro da Raiden!"
-        );
+        console.log("🧠 Conectado ao cérebro da Raiden!");
 
         enviarMensagemRaiden({
             tipo: "minecraft_status",
@@ -862,10 +962,7 @@ conexao.definirCallback(
     "fechada",
     () => {
         estadoBot.conectadoRaiden = false;
-
-        console.log(
-            "🔌 Conexão com a API da Raiden encerrada."
-        );
+        console.log("🔌 Conexão com a API da Raiden encerrada.");
     }
 );
 
@@ -880,91 +977,157 @@ conexao.definirCallback(
 );
 
 eventos.registrar();
-
 navegacao.registrarEventos();
 
-bot.once(
-    "spawn",
-    () => {
-        estadoBot.conectadoMinecraft = true;
+// ============================================================
+// 🌅 SPAWN
+// ============================================================
 
-        console.log(
-            "⛏️ RAÍDEN ENTROU NO MINECRAFT!"
-        );
+bot.once("spawn", () => {
+    estadoBot.conectadoMinecraft = true;
 
-        console.log(
-            "📍 Posição inicial:",
-            {
+    console.log("⛏️ RAÍDEN ENTROU NO MINECRAFT!");
+
+    console.log("📍 Posição inicial:", {
+        x: bot.entity.position.x,
+        y: bot.entity.position.y,
+        z: bot.entity.position.z
+    });
+
+    setTimeout(() => {
+        const invInicial = lerInventarioAtual();
+
+        estadoBot.inventarioInicial = invInicial;
+        estadoBot.inventarioInicialEm = agora();
+
+        logarInventario(invInicial, "entrou com");
+
+        enviarEvento("minecraft_inventario_inicial", {
+            inventario: invInicial,
+            posicao: {
                 x: bot.entity.position.x,
                 y: bot.entity.position.y,
                 z: bot.entity.position.z
             }
+        });
+    }, 1500);
+
+    if (DEBUG_CRAFTING) {
+        diagnosticarReceitasMinecraft();
+    }
+
+    // ⚠️ FASE 4: viewer isolado, com fallback
+    iniciarViewer();
+
+    try {
+        navegacao.inicializar();
+        console.log("🧭 Navegação inicializada.");
+    } catch (erro) {
+        console.error(
+            "❌ Erro ao inicializar navegação:",
+            erro.message
+        );
+    }
+
+    console.log(
+        "🧠 Autonomia em modo passivo. " +
+        "Aguardando ordem da API para iniciar."
+    );
+
+    if (
+        typeof conexao.reabilitarReconexao === "function"
+    ) {
+        conexao.reabilitarReconexao();
+    }
+
+    conexao.conectar();
+});
+
+// ============================================================
+// ☠️ MORTE DA RAIDEN
+// ============================================================
+
+bot.on("death", () => {
+    console.error("☠️ Raiden morreu!");
+
+    const posicaoMorte = bot.entity?.position
+        ? {
+            x: bot.entity.position.x,
+            y: bot.entity.position.y,
+            z: bot.entity.position.z
+        }
+        : null;
+
+    const inventarioAntesDeMorrer = lerInventarioAtual();
+
+    console.log(
+        "🎒 Inventário antes de morrer:",
+        inventarioAntesDeMorrer
+    );
+
+    enviarEvento("minecraft_morreu", {
+        posicao: posicaoMorte,
+        inventario: inventarioAntesDeMorrer
+    });
+
+    if (timerMorte) {
+        clearTimeout(timerMorte);
+    }
+
+    timerMorte = setTimeout(() => {
+        console.log(
+            "🔄 Reiniciando plano automaticamente após morte..."
         );
 
-        // ====================================================
-        // 🧪 DIAGNÓSTICO TEMPORÁRIO
-        // ====================================================
-        //
-        // Executa depois do spawn, quando o registry,
-        // versão e dados do Minecraft já estão disponíveis.
-        //
-
-        diagnosticarReceitasMinecraft();
-
-        if (!estadoBot.viewerIniciado) {
-            try {
-                viewer(
-                    bot,
-                    {
-                        port: VIEWER_CONFIG.porta,
-                        firstPerson:
-                            VIEWER_CONFIG.primeiraPessoa,
-                        viewDistance:
-                            VIEWER_CONFIG.distanciaVisao
-                    }
-                );
-
-                estadoBot.viewerIniciado = true;
-
-                console.log(
-                    `👁️ Viewer iniciado em http://127.0.0.1:${VIEWER_CONFIG.porta}`
-                );
-            } catch (erro) {
-                console.error(
-                    "❌ Erro ao iniciar viewer:",
-                    erro.message
-                );
-            }
-        }
-
         try {
-            navegacao.inicializar();
-
-            console.log(
-                "🧭 Navegação inicializada."
-            );
+            if (autonomia) {
+                autonomia.reiniciar();
+            }
         } catch (erro) {
             console.error(
-                "❌ Erro ao inicializar navegação:",
+                "❌ Erro ao reiniciar autonomia:",
                 erro.message
             );
         }
 
+        timerMorte = null;
+    }, 3000);
+});
+
+bot.on("respawn", () => {
+    console.log(
+        "🌅 Raiden respawnou em:",
+        bot.entity?.position
+    );
+
+    if (timerMorte) {
+        clearTimeout(timerMorte);
+        timerMorte = null;
+
         console.log(
-            "🧠 Autonomia em modo passivo. " +
-            "Aguardando ordem da API para iniciar."
+            "⏳ Aguardando API decidir (recuperar drop ou reiniciar)..."
         );
 
-        if (
-            typeof conexao.reabilitarReconexao ===
-            "function"
-        ) {
-            conexao.reabilitarReconexao();
-        }
+        timerMorte = setTimeout(() => {
+            console.log(
+                "🔄 Reiniciando plano após respawn (API não respondeu)."
+            );
 
-        conexao.conectar();
+            try {
+                if (autonomia) {
+                    autonomia.reiniciar();
+                }
+            } catch (erro) {
+                console.error(
+                    "❌ Erro ao reiniciar autonomia:",
+                    erro.message
+                );
+            }
+
+            timerMorte = null;
+        }, 5000);
     }
-);
+});
 
 bot.on(
     "physicsTick",
@@ -973,8 +1136,7 @@ bot.on(
             return;
         }
 
-        estadoBot.ultimaAtualizacaoEstado =
-            agora();
+        estadoBot.ultimaAtualizacaoEstado = agora();
     }
 );
 
@@ -984,10 +1146,13 @@ bot.on(
         estadoBot.conectadoMinecraft = false;
         estadoBot.conectadoRaiden = false;
 
+        if (timerMorte) {
+            clearTimeout(timerMorte);
+            timerMorte = null;
+        }
+
         try {
-            autonomia.parar(
-                "minecraft_desconectado"
-            );
+            autonomia.parar("minecraft_desconectado");
         } catch (_) {}
 
         try {
@@ -1006,9 +1171,7 @@ bot.on(
             conexao.desconectar();
         } catch (_) {}
 
-        console.log(
-            "🔌 Raiden saiu do Minecraft."
-        );
+        console.log("🔌 Raiden saiu do Minecraft.");
     }
 );
 
@@ -1023,9 +1186,12 @@ bot.on(
 );
 
 function desligar() {
-    console.log(
-        "\n🛑 Encerrando Raiden Minecraft..."
-    );
+    console.log("\n🛑 Encerrando Raiden Minecraft...");
+
+    if (timerMorte) {
+        clearTimeout(timerMorte);
+        timerMorte = null;
+    }
 
     try {
         autonomia.parar("desligamento");
@@ -1073,5 +1239,7 @@ module.exports = {
     conexao,
 
     executarAcao,
-    criarEstado
+    criarEstado,
+
+    cancelarTimerMorte
 };

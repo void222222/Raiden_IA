@@ -10,6 +10,24 @@
  * - usar itens
  *
  * Não decide o que fazer.
+ *
+ * ⚠️ CORREÇÕES DESTA VERSÃO:
+ *
+ * 1. `quebrar` tem TIMEOUT de 8s. Se o bot.dig travar,
+ *    considera falha, chama bot.stopDigging() e retorna.
+ *    Se o bloco já sumiu (aborted / not found), considera
+ *    SUCESSO.
+ *
+ * 2. `colocar` agora VALIDA que `nomeItem` é BLOCO antes
+ *    de tentar colocar. Antes, tentava colocar
+ *    `wooden_pickaxe` como bloco e o servidor recusava.
+ *
+ * 3. `colocar` agora VALIDA que `inventario` existe no
+ *    contexto, e loga quando a referência está fora de
+ *    alcance (facilita debug).
+ *
+ * 4. Exporta `obterBlocoReferencia` e `distanciaDoBot`
+ *    para o módulo de construção poder usar.
  */
 
 const { Vec3 } = require("vec3");
@@ -22,8 +40,61 @@ function criarMundo(contexto) {
         distanciaMaximaInteracao: 4.5,
         distanciaMaximaQuebra: 5,
         raioBuscaMaximo: 32,
-        limiteBusca: 200
+        limiteBusca: 200,
+
+        // ⚠️ TIMEOUTS
+        timeoutQuebraMs: 8000,
+        timeoutColocarMs: 5000,
+        timeoutInteragirMs: 5000,
+        timeoutUsarMs: 3000
     };
+
+    // =========================================================
+    // ⏱️ TIMEOUT HELPER
+    // =========================================================
+
+    /*
+     * Roda uma Promise com timeout.
+     * Se a Promise não resolver em `ms`, lança erro.
+     *
+     * Também aceita uma função de limpeza opcional para
+     * chamar quando o timeout dispara (ex: stopDigging).
+     */
+    async function comTimeout(
+        promessa,
+        ms,
+        mensagemErro,
+        aoExpirar = null
+    ) {
+        let timerId;
+
+        const timerPromise = new Promise((_, reject) => {
+            timerId = setTimeout(() => {
+                reject(
+                    new Error(mensagemErro || `Timeout de ${ms}ms`)
+                );
+            }, ms);
+        });
+
+        try {
+            const resultado = await Promise.race([
+                promessa,
+                timerPromise
+            ]);
+
+            clearTimeout(timerId);
+            return resultado;
+
+        } catch (erro) {
+            clearTimeout(timerId);
+
+            if (typeof aoExpirar === "function") {
+                try { aoExpirar(); } catch (_) {}
+            }
+
+            throw erro;
+        }
+    }
 
     // =========================================================
     // 📍 GEOMETRIA
@@ -117,13 +188,6 @@ function criarMundo(contexto) {
     // 🔍 NORMALIZAÇÃO DE NOMES
     // =========================================================
 
-    /*
-     * Aceita:
-     *   "oak_log"              → { nomes: ["oak_log"], ids: [id] }
-     *   ["oak_log", "birch"]   → múltiplos
-     *
-     * Filtra nomes desconhecidos do registry.
-     */
     function normalizarNomes(nome) {
         let lista = [];
 
@@ -161,18 +225,6 @@ function criarMundo(contexto) {
     // =========================================================
     // 🔍 ENCONTRAR BLOCOS
     // =========================================================
-    //
-    // Aceita string OU array de strings.
-    //
-    // Retorna lista de blocos no formato:
-    //   {
-    //     id, nome, displayName,
-    //     posicao: { x, y, z },
-    //     distancia,
-    //     nomeEncontrado   // qual dos nomes da lista casou
-    //   }
-    //
-    // Ordenado por distância crescente.
 
     function encontrarBlocos(
         nome,
@@ -201,14 +253,6 @@ function criarMundo(contexto) {
             CONFIG.limiteBusca
         );
 
-        /*
-         * bot.findBlocks aceita:
-         *   matching: id | array de ids | função
-         *
-         * Usamos função pra confirmar que o id está na lista
-         * que queremos. Isso evita falsos positivos se
-         * `bot.findBlocks` fizer alguma normalização interna.
-         */
         const idsSet = new Set(ids);
 
         let posicoes = [];
@@ -226,11 +270,6 @@ function criarMundo(contexto) {
                 count: quantidade
             });
         } catch (erro) {
-            /*
-             * Fallback: versões antigas do Mineflayer não
-             * aceitam função em `matching`. Passa o array
-             * de ids direto.
-             */
             try {
                 posicoes = bot.findBlocks({
                     matching: ids,
@@ -261,7 +300,6 @@ function criarMundo(contexto) {
                 bloco.name || ""
             ).toLowerCase();
 
-            // Aceita só se o nome está na lista pedida
             if (nomes.length && !nomes.includes(nomeEncontrado)) {
                 continue;
             }
@@ -314,7 +352,7 @@ function criarMundo(contexto) {
     }
 
     // =========================================================
-    // ⛏ QUEBRAR
+    // ⛏ QUEBRAR — COM TIMEOUT
     // =========================================================
 
     async function quebrar(x, y, z) {
@@ -345,10 +383,38 @@ function criarMundo(contexto) {
                 );
             }
 
-            await bot.dig(bloco, true);
+            // ⚠️ TIMEOUT: se bot.dig não retornar em 8s,
+            // considera falha e força stopDigging.
+            await comTimeout(
+                bot.dig(bloco, true),
+                CONFIG.timeoutQuebraMs,
+                "bot.dig excedeu timeout",
+                () => {
+                    try { bot.stopDigging(); } catch (_) {}
+                }
+            );
 
             return true;
+
         } catch (erro) {
+            // Garante que o bot pare de digitar em qualquer erro
+            try { bot.stopDigging(); } catch (_) {}
+
+            // ⚠️ Bloco já não existe? Considera sucesso.
+            // "Digging aborted" e "Block not found" significam
+            // que o bloco sumiu entre o obterBloco() e o dig().
+            const mensagem = String(erro?.message || "").toLowerCase();
+
+            const jaFoi =
+                mensagem.includes("aborted") ||
+                mensagem.includes("block not found") ||
+                mensagem.includes("não existe") ||
+                !obterBloco(x, y, z);   // <- checagem final
+
+            if (jaFoi) {
+                return true;
+            }
+
             console.error(
                 "⛏️ Erro ao quebrar bloco:",
                 erro.message
@@ -359,9 +425,22 @@ function criarMundo(contexto) {
     }
 
     // =========================================================
-    // 🧱 COLOCAR
+    // 🧱 COLOCAR — CORRIGIDO
     // =========================================================
 
+    /*
+     * ⚠️ CORREÇÃO:
+     *
+     * 1. Valida que `nomeItem` é BLOCO, não item qualquer.
+     *    Antes, tentava colocar `wooden_pickaxe` como bloco.
+     *
+     * 2. Se o bot não está ao alcance da referência,
+     *    retorna false direto (sem tentar).
+     *
+     * 3. Valida que `inventario` existe no contexto.
+     *
+     * 4. Log detalhado pra debug.
+     */
     async function colocar(
         nomeItem,
         x,
@@ -370,6 +449,18 @@ function criarMundo(contexto) {
         face = { x: 0, y: 1, z: 0 }
     ) {
         if (!posicaoValida(x, y, z)) {
+            return false;
+        }
+
+        // ⚠️ 1. O item tem que ser BLOCO
+        const idBloco =
+            bot.registry?.blocksByName?.[nomeItem]?.id;
+
+        if (idBloco === undefined || idBloco === null) {
+            console.error(
+                `🧱 [colocar] "${nomeItem}" NÃO é bloco ` +
+                `(ou não existe no registry).`
+            );
             return false;
         }
 
@@ -402,12 +493,30 @@ function criarMundo(contexto) {
         }
 
         if (!estaAoAlcance(referencia.position)) {
+            console.error(
+                `🧱 [colocar] Referência fora de alcance ` +
+                `(dist=${distanciaDoBot(referencia.position).toFixed(2)}).`
+            );
+            return false;
+        }
+
+        // ⚠️ 2. Procura o item de BLOCO no inventário
+        if (
+            !inventario ||
+            typeof inventario.procurarItem !== "function"
+        ) {
+            console.error(
+                "🧱 [colocar] inventario indisponível no contexto."
+            );
             return false;
         }
 
         const item = inventario.procurarItem(nomeItem);
 
         if (!item) {
+            console.error(
+                `🧱 [colocar] Sem "${nomeItem}" no inventário.`
+            );
             return false;
         }
 
@@ -419,12 +528,17 @@ function criarMundo(contexto) {
                 true
             );
 
-            await bot.placeBlock(
-                referencia,
-                normalizarFace(face)
+            await comTimeout(
+                bot.placeBlock(
+                    referencia,
+                    normalizarFace(face)
+                ),
+                CONFIG.timeoutColocarMs,
+                "bot.placeBlock excedeu timeout"
             );
 
             return true;
+
         } catch (erro) {
             console.error(
                 "🧱 Erro ao colocar bloco:",
@@ -436,7 +550,7 @@ function criarMundo(contexto) {
     }
 
     // =========================================================
-    // 👆 INTERAGIR
+    // 👆 INTERAGIR — COM TIMEOUT
     // =========================================================
 
     async function interagir(x, y, z) {
@@ -456,9 +570,14 @@ function criarMundo(contexto) {
                 true
             );
 
-            await bot.activateBlock(bloco);
+            await comTimeout(
+                bot.activateBlock(bloco),
+                CONFIG.timeoutInteragirMs,
+                "bot.activateBlock excedeu timeout"
+            );
 
             return true;
+
         } catch (erro) {
             console.error(
                 "🌍 Erro ao interagir com bloco:",
@@ -476,6 +595,13 @@ function criarMundo(contexto) {
     async function usarItem(nomeItem = null) {
         try {
             if (nomeItem) {
+                if (
+                    !inventario ||
+                    typeof inventario.procurarItem !== "function"
+                ) {
+                    return false;
+                }
+
                 const item = inventario.procurarItem(nomeItem);
 
                 if (!item) {
@@ -488,6 +614,7 @@ function criarMundo(contexto) {
             bot.activateItem();
 
             return true;
+
         } catch (erro) {
             console.error(
                 "🖐️ Erro ao usar item:",
@@ -591,18 +718,31 @@ function criarMundo(contexto) {
     // =========================================================
 
     return {
+        // Consulta
         obterBloco,
         obterBlocoEstado,
+        obterBlocoReferencia,   // ⚠️ NOVO: exportado
         encontrarBlocos,
+
+        // Ações
         quebrar,
         colocar,
         interagir,
         usarItem,
+
+        // Adjacentes
         obterBlocoSob,
         obterBlocosAoRedor,
+
+        // Consultas rápidas
         estaLivre,
         estaSolido,
         estaAoAlcance,
+
+        // ⚠️ NOVO: exportado (usado no log de colocar)
+        distanciaDoBot,
+
+        // Estado
         obterEstado
     };
 }
