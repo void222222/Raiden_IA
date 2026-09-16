@@ -23,15 +23,13 @@ CENÁRIO C:
 # ============================================================
 
 import asyncio
-import json
+import os
+import queue
 import re
 import sys
 import threading
-import queue
-import time
 
-from collections import Counter
-from typing import Optional
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 
@@ -71,14 +69,12 @@ from nucleo.config import (
     PASTA_PUBLIC_CHATVRM,
     PASTA_PAINEL,
     MINECRAFT_AUTONOMIA_ATIVA,
-    MINECRAFT_INTERVALO_DECISAO,
     MINECRAFT_RESUMO_INTERVALO,
 )
 
 from nucleo.filas import (
     fila_perguntas,
     fila_respostas,
-    minecraft_autonomia_evento,
 )
 
 from nucleo.utils import (
@@ -110,7 +106,6 @@ from nucleo.estado_minecraft import (
 
     # Estado
     obter_estado_autonomia_minecraft,
-    obter_estado_minecraft,
     obter_objetivo_minecraft,
 
     # Resultados
@@ -123,16 +118,22 @@ from nucleo.estado_minecraft import (
     existe_acao_pendente,
 )
 
-from nucleo.llm_conversa import pensar_ollama
 from nucleo.llm_minecraft import (
-    pensar_acao_minecraft,
     validar_acao_minecraft,
 )
-from nucleo.voz import gerar_voz_base64
 
 from nucleo.cerebro import (
-    gerar_resposta,
     worker_cerebro,
+)
+
+from nucleo.loop_minecraft import (
+    iniciar_autonomia_minecraft,
+    parar_autonomia_minecraft,
+    _autonomia_esta_rodando,
+)
+
+from nucleo.websocket_minecraft import (
+    handler_websocket_minecraft,
 )
 
 
@@ -152,251 +153,6 @@ import modulos.frontend as front_module
 import modulos.livepix as pix_module
 import modulos.minecraft as minecraft_module
 import modulos.minecraft_objetivos as minecraft_objetivos_module
-
-
-# ============================================================
-# 5. ESTADO GLOBAL
-# ============================================================
-
-minecraft_tarefa_autonomia = None
-
-
-# ============================================================
-# 🎯 HANDLE DA TASK DE AUTONOMIA
-# ============================================================
-
-def _autonomia_esta_rodando() -> bool:
-    """
-    Diz se a tarefa assíncrona da autonomia
-    está realmente viva.
-    """
-
-    tarefa = minecraft_tarefa_autonomia
-
-    return (
-        tarefa is not None
-        and not tarefa.done()
-    )
-
-
-# ============================================================
-# ⛏ EXECUTAR DECISÃO MINECRAFT
-# ============================================================
-
-async def executar_decisao_minecraft(
-    decisao: dict
-) -> Optional[str]:
-
-    if not decisao:
-        return None
-
-    decisao_validada = validar_acao_minecraft(decisao)
-
-    if decisao_validada is None:
-        logger.warning(
-            "⚠️ Decisão Minecraft rejeitada."
-        )
-        return None
-
-    acao = decisao_validada.get("acao")
-
-    if acao in {None, "nenhuma"}:
-        logger.info("⛏ Raiden decidiu não agir.")
-        return None
-
-    bridge = minecraft_module.minecraft_bridge
-
-    if not bridge.conectado:
-        logger.warning("⛏ Minecraft não conectado.")
-        return None
-
-    parametros = {
-        chave: valor
-        for chave, valor in decisao_validada.items()
-        if chave != "acao"
-    }
-
-    acao_id = gerar_acao_id_minecraft()
-
-    logger.info(
-        "⛏🧠 Raiden decidiu: %s | acao_id=%s",
-        decisao_validada,
-        acao_id
-    )
-
-    try:
-        sucesso = await bridge.executar_acao(
-            acao,
-            acao_id=acao_id,
-            **parametros
-        )
-
-        if not sucesso:
-            logger.warning(
-                "⛏ Falha ao enviar ação %s",
-                acao_id
-            )
-            return None
-
-        if acao in {
-            "definir_objetivo",
-            "iniciar_autonomia",
-            "parar_autonomia",
-            "reiniciar_autonomia"
-        }:
-            return acao_id
-
-        marcar_acao_pendente(acao_id)
-        return acao_id
-
-    except Exception as e:
-        logger.error(
-            f"❌ Erro executando ação Minecraft: {e}"
-        )
-        return None
-
-
-# ============================================================
-# ⛏🤖 LOOP AUTÔNOMO DO MINECRAFT
-# ============================================================
-
-async def loop_autonomia_minecraft():
-    """
-    Loop estratégico:
-        percepção → estado da autonomia JS → Ollama decide
-        → envia (ou não) comando → dorme
-    """
-
-    logger.info(
-        "⛏🤖 Loop estratégico Minecraft iniciado."
-    )
-
-    while True:
-
-        try:
-            await minecraft_autonomia_evento.wait()
-
-            bridge = minecraft_module.minecraft_bridge
-
-            if not bridge.conectado:
-                await asyncio.sleep(2)
-                continue
-
-            if existe_acao_pendente():
-                await asyncio.sleep(1)
-                continue
-
-            estado = obter_estado_minecraft()
-
-            decisao = await pensar_acao_minecraft(estado)
-
-            if decisao:
-                await executar_decisao_minecraft(decisao)
-
-            await asyncio.sleep(
-                MINECRAFT_INTERVALO_DECISAO
-            )
-
-        except asyncio.CancelledError:
-            logger.info(
-                "⛏🤖 Loop Minecraft encerrado."
-            )
-            raise
-
-        except Exception as e:
-            logger.error(
-                f"❌ Erro no loop Minecraft: {e}"
-            )
-            await asyncio.sleep(3)
-
-
-# ============================================================
-# ⛏ INICIAR AUTONOMIA
-# ============================================================
-
-async def iniciar_autonomia_minecraft():
-
-    global minecraft_tarefa_autonomia
-
-
-    if (
-        minecraft_tarefa_autonomia is not None
-        and not minecraft_tarefa_autonomia.done()
-    ):
-
-        logger.info(
-            "⛏🤖 Autonomia Minecraft já está "
-            "rodando, ignorando reinício."
-        )
-
-        return
-
-
-    if minecraft_tarefa_autonomia is not None:
-
-        logger.warning(
-            "⛏🤖 Tarefa de autonomia anterior "
-            "estava finalizada. Recriando."
-        )
-
-        minecraft_tarefa_autonomia = None
-
-
-    if not MINECRAFT_AUTONOMIA_ATIVA:
-
-        logger.info(
-            "⛏🤖 Autonomia Minecraft desativada "
-            "por configuração."
-        )
-        return
-
-    minecraft_autonomia_evento.set()
-
-    minecraft_tarefa_autonomia = (
-        asyncio.create_task(
-            loop_autonomia_minecraft()
-        )
-    )
-
-    logger.info(
-        "⛏🤖 Loop estratégico Minecraft preparado."
-    )
-
-
-# ============================================================
-# ⛏ PARAR AUTONOMIA
-# ============================================================
-
-async def parar_autonomia_minecraft():
-
-    global minecraft_tarefa_autonomia
-
-
-    minecraft_autonomia_evento.clear()
-
-
-    if minecraft_tarefa_autonomia:
-
-        minecraft_tarefa_autonomia.cancel()
-
-
-        try:
-
-            await (
-                minecraft_tarefa_autonomia
-            )
-
-        except asyncio.CancelledError:
-
-            pass
-
-
-        minecraft_tarefa_autonomia = None
-
-
-    logger.info(
-        "⛏🤖 Autonomia Minecraft parada."
-    )
 
 
 # ============================================================
@@ -762,7 +518,8 @@ async def chat_endpoint(
         resposta = await asyncio.to_thread(
             fila_retorno.get,
             True,
-            60        )
+            60
+        )
 
 
         return resposta
@@ -906,339 +663,14 @@ async def websocket_chat(
 
 
 # ============================================================
-# ⛏ WEBSOCKET DO MINECRAFT
+# ⛏ WEBSOCKET DO MINECRAFT (rota fina)
 # ============================================================
 
 @app.websocket("/ws/minecraft")
-async def websocket_minecraft(
+async def websocket_minecraft_route(
     websocket: WebSocket
 ):
-
-    await websocket.accept()
-
-
-    bridge = (
-        minecraft_module
-        .minecraft_bridge
-    )
-
-
-    await bridge.conectar(
-        websocket
-    )
-
-
-    logger.info(
-        "⛏ Conexão Minecraft estabelecida."
-    )
-
-
-    await bridge.enviar({
-
-        "tipo": "conexao",
-
-        "status": "ok",
-
-        "mensagem":
-            "Minecraft conectado à Raiden."
-
-    })
-
-    if (
-        MINECRAFT_AUTONOMIA_ATIVA
-        and bridge.conectado
-    ):
-        try:
-            objetivo_inicial = (
-                minecraft_objetivos_module
-                .minecraft_objetivos
-                .obter_estado()
-            )
-
-            if (
-                objetivo_inicial
-                and objetivo_inicial.get("existe")
-            ):
-                obj = objetivo_inicial.get("objetivo") or {}
-
-                payload_objetivo = {
-                    "id": obj.get("id"),
-                    "nome": obj.get("nome"),
-                    "descricao": obj.get("descricao"),
-                }
-
-                if obj.get("itens_necessarios"):
-                    payload_objetivo["itens_necessarios"] = (
-                        obj["itens_necessarios"]
-                    )
-
-                if obj.get("construir"):
-                    payload_objetivo["construir"] = obj["construir"]
-
-                if not obj.get("itens_necessarios") and obj.get("etapas"):
-                    payload_objetivo["etapas"] = obj["etapas"]
-
-                await bridge.executar_acao(
-                    "definir_objetivo",
-                    acao_id=gerar_acao_id_minecraft(),
-                    **payload_objetivo
-                )
-
-                await bridge.executar_acao(
-                    "iniciar_autonomia",
-                    acao_id=gerar_acao_id_minecraft()
-                )
-
-                logger.info(
-                    "⛏🤖 Objetivo inicial enviado ao bot: %s",
-                    payload_objetivo.get("id")
-                )
-
-        except Exception as e:
-
-            logger.error(
-                f"❌ Erro no bootstrap da autonomia: {e}"
-            )
-
-
-    try:
-
-        while True:
-
-            mensagem = (
-                await websocket.receive_json()
-            )
-
-
-            if not isinstance(
-                mensagem,
-                dict
-            ):
-
-                logger.warning(
-                    "⚠️ Minecraft enviou "
-                    "mensagem inválida."
-                )
-
-
-                await bridge.enviar({
-
-                    "tipo": "erro",
-
-                    "mensagem":
-                        "A mensagem precisa "
-                        "ser um objeto JSON."
-
-                })
-
-
-                continue
-
-
-            tipo = mensagem.get(
-                "tipo",
-                "desconhecido"
-            )
-
-
-            if tipo == "ack":
-
-                continue
-
-
-            if tipo == "ping":
-
-                await bridge.enviar({
-
-                    "tipo": "pong",
-
-                    "timestamp":
-                        mensagem.get(
-                            "timestamp"
-                        )
-
-                })
-
-                continue
-
-
-            if tipo == "estado":
-
-                estado_real = mensagem.get("estado")
-
-                if isinstance(estado_real, dict):
-
-                    bridge.atualizar_estado(
-                        estado_real
-                    )
-
-                else:
-
-                    logger.warning(
-                        "⚠️ Mensagem de estado sem "
-                        "chave 'estado' válida."
-                    )
-
-                await bridge.enviar({
-
-                    "tipo": "ack",
-
-                    "origem": "raiden",
-
-                    "evento":
-                        "estado_recebido"
-
-                })
-
-                continue
-
-
-            if (
-                tipo ==
-                "minecraft_acao_resultado"
-            ):
-
-                acao_id = (
-                    mensagem.get("acao_id")
-                    or mensagem.get("id")
-                )
-
-                acao_id_normalizado = (
-                    _normalizar_acao_id(acao_id)
-                )
-
-                origem = mensagem.get("origem", "api")
-
-                if acao_id_normalizado is None:
-
-                    if origem == "autonomia":
-
-                        logger.info(
-                            "⛏ Resultado de ação da autonomia "
-                            "(sem acao_id): %s",
-                            mensagem.get("acao")
-                        )
-
-                    else:
-
-                        logger.warning(
-                            "⚠️ Resultado de ação Minecraft "
-                            "sem acao_id e origem != autonomia. "
-                            "payload=%r",
-                            mensagem
-                        )
-
-                else:
-
-                    mensagem["acao_id"] = acao_id_normalizado
-
-                bridge.registrar_resultado_acao(
-                    mensagem
-                )
-
-                registrar_resultado_acao_minecraft(
-                    mensagem
-                )
-
-                registrar_evento_minecraft({
-                    "tipo": "minecraft_acao_resultado",
-                    **mensagem
-                })
-
-                logger.info(
-                    "⛏ Resultado da ação: %s",
-                    mensagem
-                )
-
-                continue
-
-
-            if tipo == "minecraft_chat":
-
-                bridge.registrar_chat(
-                    mensagem
-                )
-
-
-                registrar_evento_minecraft(
-                    mensagem
-                )
-
-
-                logger.info(
-                    "💬 Minecraft: "
-                    f"{mensagem.get('usuario')}: "
-                    f"{mensagem.get('mensagem')}"
-                )
-
-
-                continue
-
-
-            if tipo == "minecraft_evento":
-
-                evento_nome = str(
-                    mensagem.get("evento") or ""
-                )
-
-                if evento_nome.startswith("minecraft_autonomia_"):
-
-                    registrar_evento_autonomia_minecraft(
-                        mensagem
-                    )
-
-                else:
-
-                    registrar_evento_minecraft(
-                        mensagem
-                    )
-
-                continue
-
-
-            logger.info(
-                "⛏ Minecraft → Raiden | "
-                f"tipo={tipo} | dados={mensagem}"
-            )
-
-
-            await bridge.enviar({
-
-                "tipo": "ack",
-
-                "origem": "raiden",
-
-                "evento":
-                    "mensagem_recebida",
-
-                "tipo_recebido":
-                    tipo
-
-            })
-
-
-    except WebSocketDisconnect:
-
-        logger.info(
-            "⛏ Minecraft encerrou a conexão."
-        )
-
-
-    except Exception:
-
-        logger.exception(
-            "❌ Erro no WebSocket Minecraft"
-        )
-
-
-    finally:
-
-        await bridge.desconectar()
-
-
-        logger.info(
-            "⛏ Conexão Minecraft finalizada."
-        )
+    await handler_websocket_minecraft(websocket)
 
 
 # ============================================================
@@ -1267,10 +699,6 @@ async def minecraft_status():
 
         "autonomia_rodando":
             _autonomia_esta_rodando(),
-
-        "autonomia_tarefa_existe":
-            minecraft_tarefa_autonomia
-            is not None,
 
         "estado":
             bridge.obter_estado(),
@@ -1973,21 +1401,6 @@ async def abrir_painel():
 # ============================================================
 # 👗 GESTÃO DE ARQUIVOS
 # ============================================================
-
-EXTENSOES_PERMITIDAS = {
-
-    ".vrm",
-
-    ".vrma",
-
-    ".png",
-
-    ".jpg",
-
-    ".jpeg"
-
-}
-
 
 @app.get("/api/arquivos")
 async def listar_arquivos():
