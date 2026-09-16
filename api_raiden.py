@@ -17,10 +17,18 @@ CENÁRIO C:
       (minerar, craftar, construir).
     - Ações pontuais do Ollama ainda passam pelo bridge.
 
-⚠️ N4A — ROTAS SIMPLES MOVIDAS:
-    - painel, memória, arquivos → rotas/
-    - Os endpoints foram removidos daqui.
-    - Os routers são registrados no fim do arquivo.
+⚠️ REFATORAÇÃO N4:
+    Rotas HTTP foram extraídas para rotas/.
+    Este arquivo agora só contém:
+    - Lifespan (startup/shutdown)
+    - WebSocket /ws (chat)
+    - WebSocket /ws/minecraft (bridge)
+    - CORS + arquivos estáticos
+    - Registro dos routers
+
+    Rotas movidas:
+      N4A: painel, memoria, arquivos
+      N4B: chat, minecraft
 """
 
 # ============================================================
@@ -28,10 +36,8 @@ CENÁRIO C:
 # ============================================================
 
 import asyncio
-import queue
 import threading
 
-from pathlib import Path
 from contextlib import asynccontextmanager
 
 
@@ -44,7 +50,6 @@ import speech_recognition as sr
 
 from fastapi import (
     FastAPI,
-    HTTPException,
     WebSocket,
     WebSocketDisconnect
 )
@@ -69,42 +74,14 @@ from nucleo.config import (
 
 from nucleo.filas import (
     fila_perguntas,
-    fila_respostas,
 )
 
 from nucleo.utils import (
     calar_linux,
-    gerar_acao_id_minecraft,
-    _normalizar_acao_id,
-)
-
-from nucleo.requests import (
-    MensagemRequest,
-    MinecraftAcaoRequest,
-    MinecraftObjetivoRequest,
-    MinecraftProgressoRequest,
 )
 
 from nucleo.historico import (
     limpar_historico,
-)
-
-from nucleo.estado_minecraft import (
-    registrar_evento_autonomia_minecraft,
-    registrar_evento_minecraft,
-    registrar_resultado_acao_minecraft,
-    obter_ultimos_eventos_minecraft,
-    obter_estado_autonomia_minecraft,
-    obter_objetivo_minecraft,
-    obter_ultimo_resultado_acao_minecraft,
-    obter_resultado_acao_minecraft,
-    marcar_acao_pendente,
-    obter_acao_pendente_id,
-    existe_acao_pendente,
-)
-
-from nucleo.llm_minecraft import (
-    validar_acao_minecraft,
 )
 
 from nucleo.cerebro import (
@@ -114,7 +91,6 @@ from nucleo.cerebro import (
 from nucleo.loop_minecraft import (
     iniciar_autonomia_minecraft,
     parar_autonomia_minecraft,
-    _autonomia_esta_rodando,
 )
 
 from nucleo.websocket_minecraft import (
@@ -133,17 +109,17 @@ from modulos.web_memoria import (
 import modulos.youtube as yt_module
 import modulos.frontend as front_module
 import modulos.livepix as pix_module
-import modulos.minecraft as minecraft_module
-import modulos.minecraft_objetivos as minecraft_objetivos_module
 
 
 # ============================================================
-# 5. ROTAS (N4A)
+# 5. ROTAS (N4A + N4B)
 # ============================================================
 
 from rotas.painel import router as painel_router
 from rotas.memoria import router as memoria_router
 from rotas.arquivos import router as arquivos_router
+from rotas.chat import router as chat_router
+from rotas.minecraft import router as minecraft_router
 
 
 # ============================================================
@@ -400,12 +376,14 @@ app.add_middleware(
 
 
 # ============================================================
-# 🧩 ROUTERS (N4A)
+# 🧩 ROUTERS (N4A + N4B)
 # ============================================================
 
 app.include_router(painel_router)
 app.include_router(memoria_router)
 app.include_router(arquivos_router)
+app.include_router(chat_router)
+app.include_router(minecraft_router)
 
 
 # ============================================================
@@ -423,62 +401,6 @@ app.mount(
     name="midia"
 
 )
-
-
-# ============================================================
-# 💬 CHAT MANUAL
-# ============================================================
-
-@app.post("/chat")
-async def chat_endpoint(
-    req: MensagemRequest
-):
-
-    texto = (
-        req.texto
-        or req.text
-        or ""
-    ).strip()
-
-    if not texto:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Texto vazio!"
-        )
-
-    fila_retorno = (
-        queue.Queue(
-            maxsize=1
-        )
-    )
-
-    fila_perguntas.put(
-        (
-            texto,
-            fila_retorno
-        )
-    )
-
-    try:
-
-        resposta = await asyncio.to_thread(
-            fila_retorno.get,
-            True,
-            60
-        )
-
-        return resposta
-
-    except queue.Empty:
-
-        raise HTTPException(
-            status_code=504,
-            detail=(
-                "A Raiden demorou mais de "
-                "60 segundos para responder."
-            )
-        )
 
 
 # ============================================================
@@ -524,7 +446,7 @@ async def websocket_chat(
             )
 
             fila_retorno = (
-                queue.Queue(
+                asyncio.Queue(
                     maxsize=1
                 )
             )
@@ -539,14 +461,13 @@ async def websocket_chat(
             try:
 
                 resposta = (
-                    await asyncio.to_thread(
-                        fila_retorno.get,
-                        True,
-                        60
+                    await asyncio.wait_for(
+                        fila_retorno.get(),
+                        timeout=60
                     )
                 )
 
-            except queue.Empty:
+            except asyncio.TimeoutError:
 
                 await websocket.send_json({
 
@@ -602,356 +523,6 @@ async def websocket_minecraft_route(
     websocket: WebSocket
 ):
     await handler_websocket_minecraft(websocket)
-
-
-# ============================================================
-# ⛏ STATUS DO MINECRAFT
-# ============================================================
-
-@app.get("/api/minecraft/status")
-async def minecraft_status():
-
-    bridge = (
-        minecraft_module
-        .minecraft_bridge
-    )
-
-    return {
-
-        "conectado":
-            bridge.conectado,
-
-        "autonomia":
-            MINECRAFT_AUTONOMIA_ATIVA,
-
-        "autonomia_habilitada":
-            MINECRAFT_AUTONOMIA_ATIVA,
-
-        "autonomia_rodando":
-            _autonomia_esta_rodando(),
-
-        "estado":
-            bridge.obter_estado(),
-
-        "objetivo":
-            obter_objetivo_minecraft(),
-
-        "autonomia_js":
-            obter_estado_autonomia_minecraft(),
-
-        "ultima_acao":
-            bridge.obter_ultima_acao(),
-
-        "ultimo_resultado_acao":
-            obter_ultimo_resultado_acao_minecraft(),
-
-        "ultimo_chat":
-            bridge.obter_ultima_mensagem_chat(),
-
-        "acao_pendente":
-            existe_acao_pendente(),
-
-        "acao_pendente_id":
-            obter_acao_pendente_id(),
-
-        "ultima_acao_id":
-            _normalizar_acao_id(
-                (
-                    bridge.obter_ultima_acao()
-                    or {}
-                ).get("acao_id")
-            ),
-
-        "eventos_recentes":
-            obter_ultimos_eventos_minecraft()
-
-    }
-
-
-# ============================================================
-# ⛏ OBJETIVO ATUAL
-# ============================================================
-
-@app.get("/api/minecraft/objetivo")
-async def minecraft_objetivo():
-
-    return obter_objetivo_minecraft()
-
-
-@app.post("/api/minecraft/objetivo")
-async def definir_objetivo_minecraft(
-    objetivo: MinecraftObjetivoRequest
-):
-
-    resultado = (
-        minecraft_objetivos_module
-        .minecraft_objetivos
-        .definir_objetivo(
-            id=objetivo.id,
-            nome=objetivo.nome,
-            descricao=objetivo.descricao,
-            etapas=objetivo.etapas,
-            itens_necessarios=objetivo.itens_necessarios,
-            construir=objetivo.construir,
-        )
-    )
-
-    return {
-        "status": "ok",
-        "objetivo": {
-            "id": resultado.id,
-            "nome": resultado.nome,
-            "descricao": resultado.descricao,
-            "progresso": resultado.progresso,
-            "total": resultado.total,
-            "concluido": resultado.concluido,
-            "etapas": resultado.etapas,
-            "itens_necessarios": resultado.itens_necessarios,
-            "construir": resultado.construir,
-        }
-    }
-
-
-@app.post("/api/minecraft/objetivo/progresso")
-async def atualizar_progresso_minecraft(
-    progresso: MinecraftProgressoRequest
-):
-
-    (
-        minecraft_objetivos_module
-        .minecraft_objetivos
-        .atualizar_progresso(
-            progresso.progresso
-        )
-    )
-
-    return {
-        "status": "ok",
-        "objetivo":
-            obter_objetivo_minecraft()
-    }
-
-
-@app.post("/api/minecraft/objetivo/concluir")
-async def concluir_objetivo_minecraft():
-
-    (
-        minecraft_objetivos_module
-        .minecraft_objetivos
-        .concluir_objetivo()
-    )
-
-    return {
-        "status": "ok",
-        "objetivo":
-            obter_objetivo_minecraft()
-    }
-
-
-@app.delete("/api/minecraft/objetivo")
-async def limpar_objetivo_minecraft():
-
-    (
-        minecraft_objetivos_module
-        .minecraft_objetivos
-        .limpar_objetivo()
-    )
-
-    return {
-        "status": "ok",
-        "objetivo":
-            obter_objetivo_minecraft()
-    }
-
-
-# ============================================================
-# ⛏ EXECUTAR AÇÃO MANUAL NO MINECRAFT
-# ============================================================
-
-@app.post("/api/minecraft/acao")
-async def minecraft_acao(
-    request: MinecraftAcaoRequest
-):
-
-    bridge = (
-        minecraft_module
-        .minecraft_bridge
-    )
-
-    if not bridge.conectado:
-
-        raise HTTPException(
-            status_code=503,
-            detail="Minecraft não está conectado."
-        )
-
-    decisao = {
-        "acao":
-            request.acao,
-        **request.parametros
-    }
-
-    decisao_validada = (
-        validar_acao_minecraft(
-            decisao
-        )
-    )
-
-    if decisao_validada is None:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Ação Minecraft inválida."
-        )
-
-    acao = (
-        decisao_validada["acao"]
-    )
-
-    parametros = {
-        chave: valor
-        for chave, valor
-        in decisao_validada.items()
-        if chave != "acao"
-    }
-
-    acao_id = gerar_acao_id_minecraft()
-
-    sucesso_envio = await bridge.executar_acao(
-        acao,
-        acao_id=acao_id,
-        **parametros
-    )
-
-    if sucesso_envio:
-
-        if acao not in {
-            "definir_objetivo",
-            "iniciar_autonomia",
-            "parar_autonomia",
-            "reiniciar_autonomia"
-        }:
-            marcar_acao_pendente(acao_id)
-
-    return {
-
-        "status":
-            "ok"
-            if sucesso_envio
-            else "erro",
-
-        "acao_id":
-            acao_id,
-
-        "acao":
-            decisao_validada,
-
-        "enviada":
-            sucesso_envio,
-
-        "confirmada":
-            False,
-
-        "observacao": (
-            "enviada indica apenas que a ação "
-            "foi entregue ao bridge. O resultado "
-            "real chega via evento "
-            "'minecraft_acao_resultado' no "
-            "WebSocket e pode ser consultado "
-            f"em /api/minecraft/acao/{acao_id}."
-        )
-
-    }
-
-
-# ============================================================
-# ⛏ CONSULTAR RESULTADO DE AÇÃO POR ID
-# ============================================================
-
-@app.get("/api/minecraft/acao/{acao_id}")
-async def consultar_acao_minecraft(
-    acao_id: str
-):
-
-    acao_id = _normalizar_acao_id(
-        acao_id
-    )
-
-    if not acao_id:
-
-        raise HTTPException(
-            status_code=400,
-            detail="acao_id obrigatório."
-        )
-
-    resultado = (
-        obter_resultado_acao_minecraft(
-            acao_id
-        )
-    )
-
-    if resultado is None:
-
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Nenhum resultado registrado "
-                "para esta ação."
-            )
-        )
-
-    return {
-
-        "status": "ok",
-
-        "acao_id": acao_id,
-
-        "resultado": resultado
-
-    }
-
-
-# ============================================================
-# 🔊 FILA DE ÁUDIO
-# ============================================================
-
-@app.get("/proximo_audio")
-async def proximo_audio():
-
-    try:
-
-        return (
-            fila_respostas.get_nowait()
-        )
-
-    except queue.Empty:
-
-        return {
-
-            "texto": None,
-
-            "audio_base64": None
-
-        }
-
-
-# ============================================================
-# 🧹 LIMPAR HISTÓRICO
-# ============================================================
-
-@app.post("/api/chat/limpar-historico")
-async def limpar_historico_chat():
-
-    limpar_historico()
-
-    return {
-
-        "status": "ok",
-
-        "mensagem":
-            "Histórico limpo!"
-
-    }
 
 
 # ============================================================
