@@ -7,26 +7,36 @@
  *   3. executa tarefa atual
  *   4. avança ou replaneja
  *
- * ⚠️ CORREÇÕES DESTA VERSÃO:
+ * ⚠️ CORREÇÕES DESTA VERSÃO (v3):
  *
  * 1. NAVEGAÇÃO ANTES DE ACAOEXECUTANDO
  * 2. AUTO-DESTRAVAMENTO não destrava navegação
  * 3. TIMEOUT GLOBAL em executarAcao (12s)
  * 4. AUTO-DESTRAVAMENTO de 30s em outras ações
+ * 5. PRIORIDADE DINÂMICA DE COMBATE (Fase 2)
+ * 6. FIX — NÃO PARAR AUTONOMIA AO CONCLUIR
  *
- * 5. ⚠️ NOVO (Fase 2): PRIORIDADE DINÂMICA DE COMBATE
+ * 7. ⚠️ FIX CRÍTICO — COLETOR OPORTUNISTA
  *
- *    A cada ciclo, ANTES de executar a tarefa atual,
- *    o executor consulta `percepcao.obterAmeacaEmArea()`.
+ * 8. ⚠️ FIX CRÍTICO — LIMITE DE TENTATIVAS
  *
- *    Se a sugestão for "lutar", "recuar" ou "fugir",
- *    ele injeta a tarefa `defender` no TOPO do plano.
+ * 9. ⚠️ FIX CRÍTICO — COOLDOWN DO DEFENDER
  *
- *    Controle:
- *      - Se já tem um `defender` no topo, não injeta de novo.
- *      - Se o plano já é `defender`, não injeta de novo.
- *      - Se a ameaça desapareceu, a tarefa `defender`
- *        conclui sozinha e o plano volta ao normal.
+ * 10. ⚠️ FIX CRÍTICO v3 — BUSCA SEM VARIANTES
+ *
+ *     O `buscarComCache` procurava variantes quando
+ *     não achava o bloco exato. Ex: pedia `oak_log`,
+ *     não achava, pegava `jungle_log`.
+ *
+ *     O handler `obter_bloco` quebrava jungle_log, mas
+ *     contava `contarItem("oak_log")` → SEMPRE 0.
+ *
+ *     Resultado: loop infinito de quebrar jungle_log
+ *     sem nunca progredir.
+ *
+ *     AGORA: `buscarComCache` só retorna o bloco EXATO.
+ *     Se não achar, retorna vazio. O handler decide se
+ *     aceita variante (com contagem correta) ou não.
  */
 
 const {
@@ -55,7 +65,13 @@ function criarExecutor(contexto, deps) {
 
     const LOCAL_CONFIG = {
         timeoutAcaoMs: 12000,
-        autoDestravarMs: 30000
+        autoDestravarMs: 30000,
+
+        // ⚠️ FIX: limite de tentativas antes de pular tarefa
+        maxFalhasNaTarefa: 10,
+
+        // ⚠️ FIX: cooldown pra não re-injetar defender
+        cooldownDefenderMs: 8000
     };
 
     const ACOES_NAVEGACAO = new Set([
@@ -65,9 +81,10 @@ function criarExecutor(contexto, deps) {
         "seguir"
     ]);
 
-    // ⚠️ NOVO: tipos de tarefa que são de combate.
-    // Se já tem uma dessas no topo, não injeta outra.
     const TAREFAS_COMBATE = new Set(["defender"]);
+
+    // ⚠️ FIX: cooldown do defender
+    let ultimoDefenderInjetadoEm = 0;
 
     // =========================================================
     // 📢 EMISSÃO
@@ -197,6 +214,24 @@ function criarExecutor(contexto, deps) {
     // =========================================================
     // 🗺️ CACHE DE BUSCA
     // =========================================================
+    //
+    // ⚠️ FIX v3: NÃO busca variantes.
+    //
+    // Antes, se não achava `oak_log`, procurava
+    // `birch_log`, `spruce_log`, `jungle_log`, etc.
+    //
+    // Problema: o handler `obter_bloco` recebia a
+    // tarefa com bloco=`oak_log`, quebrava `jungle_log`,
+    // mas contava `contarItem("oak_log")` → sempre 0.
+    //
+    // Loop infinito de quebrar jungle_log sem progredir.
+    //
+    // AGORA: só retorna o bloco EXATO. Se não achar,
+    // retorna [] e o handler decide o que fazer.
+    //
+    // O planejador é responsável por escolher variantes
+    // quando apropriado (via `resolverNomeReal`).
+    // =========================================================
 
     const cacheBusca = {
         em: 0,
@@ -231,28 +266,8 @@ function criarExecutor(contexto, deps) {
             encontrados = [];
         }
 
-        if (!encontrados.length) {
-            const { VARIANTES_BLOCO } = require("./constantes");
-
-            const variantes =
-                VARIANTES_BLOCO[nomeBloco] || [];
-
-            for (const v of variantes) {
-                try {
-                    const alt =
-                        contexto.mundo.encontrarBlocos(
-                            v,
-                            CONFIG.raioBuscaPadrao,
-                            1
-                        );
-
-                    if (Array.isArray(alt) && alt.length) {
-                        encontrados = alt;
-                        break;
-                    }
-                } catch (_) {}
-            }
-        }
+        // ⚠️ FIX v3: NÃO buscar variantes aqui.
+        // (ver cabeçalho do bloco acima)
 
         cacheBusca.em = agora;
         cacheBusca.chave = nomeBloco;
@@ -588,23 +603,57 @@ function criarExecutor(contexto, deps) {
     }
 
     // =========================================================
-    // ⚔️ PRIORIDADE DINÂMICA DE COMBATE — NOVO (FASE 2)
+    // 🎁 COLETOR OPORTUNISTA
     // =========================================================
 
-    /*
-     * Consulta a percepção e, se houver ameaça,
-     * injeta `defender` no topo do plano.
-     *
-     * Regras:
-     *   1. Não injeta se já tem `defender` no topo.
-     *   2. Não injeta se a ameaça é "seguro".
-     *   3. Em "lutar", "recuar" ou "fugir", injeta.
-     *   4. Não injeta se o estado está em perigo crítico
-     *      (o bloco de perigo crítico já tratou).
-     *
-     * A tarefa `defender` conclui sozinha quando
-     * a ameaça desaparece.
-     */
+    async function tentarColetarOportunista() {
+        const coletor = contexto.coletor;
+
+        if (!coletor) return false;
+
+        if (typeof coletor.temItemNoChao !== "function") {
+            return false;
+        }
+
+        let temItem = false;
+
+        try {
+            temItem = coletor.temItemNoChao() === true;
+        } catch (_) {
+            return false;
+        }
+
+        if (!temItem) return false;
+
+        console.log(
+            `🎁 [AUTONOMIA] Item no chão detectado. ` +
+            `Coletando antes de continuar o plano.`
+        );
+
+        try {
+            if (typeof coletor.coletar === "function") {
+                await coletor.coletar();
+            }
+
+            await new Promise(r => setTimeout(r, 300));
+
+            estado.definirUltimoMovimento(Date.now());
+
+            return true;
+
+        } catch (erro) {
+            console.error(
+                "🎁 [AUTONOMIA] Erro no coletor:",
+                erro.message
+            );
+            return false;
+        }
+    }
+
+    // =========================================================
+    // ⚔️ PRIORIDADE DINÂMICA DE COMBATE
+    // =========================================================
+
     function injetarPrioridadeCombate() {
         if (!percepcao) return false;
         if (typeof percepcao.obterAmeacaEmArea !== "function") {
@@ -624,7 +673,6 @@ function criarExecutor(contexto, deps) {
 
         const tarefaAtual = estado.tarefaAtual();
 
-        // Já está defendendo? Não injeta de novo.
         if (
             tarefaAtual &&
             TAREFAS_COMBATE.has(tarefaAtual.tipo)
@@ -632,12 +680,19 @@ function criarExecutor(contexto, deps) {
             return false;
         }
 
-        // Verifica o plano atual pra não duplicar
+        const agora = Date.now();
+
+        if (
+            agora - ultimoDefenderInjetadoEm <
+            LOCAL_CONFIG.cooldownDefenderMs
+        ) {
+            return false;
+        }
+
         const st = estado.obter();
         const plano = st.planoAtual || [];
         const indice = st.indiceTarefa || 0;
 
-        // Olha as próximas 3 tarefas
         const proximas = plano.slice(indice, indice + 3);
 
         const jaTemDefender = proximas.some(t =>
@@ -646,7 +701,6 @@ function criarExecutor(contexto, deps) {
 
         if (jaTemDefender) return false;
 
-        // Injeta no topo (antes do índice atual)
         try {
             plano.splice(indice, 0, {
                 tipo: "defender",
@@ -669,6 +723,8 @@ function criarExecutor(contexto, deps) {
             );
             return false;
         }
+
+        ultimoDefenderInjetadoEm = agora;
 
         console.log(
             `⚔️ [AUTONOMIA] Ameaça detectada ` +
@@ -784,13 +840,13 @@ function criarExecutor(contexto, deps) {
 
             verificarProgresso();
 
-            // ⚠️ NOVO (Fase 2): prioridade de combate
-            // Roda DEPOIS do perigo crítico e ANTES
-            // de checar se a meta foi concluída.
-            //
-            // Assim, se a Raiden tem um inimigo perto,
-            // ela larga o que está fazendo e luta.
             injetarPrioridadeCombate();
+
+            const coletou = await tentarColetarOportunista();
+
+            if (coletou) {
+                return;
+            }
 
             const st = estado.obter();
 
@@ -802,29 +858,17 @@ function criarExecutor(contexto, deps) {
                     console.log(
                         `✅ [AUTONOMIA] Objetivo ` +
                         `"${st.metaAtual?.nome}" concluído. ` +
-                        `Parando execução pra aguardar nova meta.`
+                        `Aguardando nova meta da API.`
                     );
 
                     emitir("objetivo_concluido", {
                         meta: st.metaAtual,
                         plano: st.planoAtual
                     });
-
-                    // ⚠️ NOVO: para o setInterval pra não
-                    // ficar em loop de "travamento persistente"
-                    if (
-                        contexto &&
-                        typeof contexto.pararAutonomia === "function"
-                    ) {
-                        try {
-                            contexto.pararAutonomia(
-                                "objetivo_concluido"
-                            );
-                        } catch (_) {}
-                    }
                 }
                 return;
             }
+
             const tarefa = estado.tarefaAtual();
             const resultado = await executarTarefa(tarefa);
 
@@ -851,16 +895,35 @@ function criarExecutor(contexto, deps) {
 
             estado.incrementarFalhasTarefa();
 
-            if (
-                estado.obter().falhasNaTarefaAtual >=
-                CONFIG.falhasAntesDeReplanejar
-            ) {
+            const falhasAtuais =
+                estado.obter().falhasNaTarefaAtual;
+
+            if (falhasAtuais >= LOCAL_CONFIG.maxFalhasNaTarefa) {
+                console.error(
+                    `🚨 [AUTONOMIA] Tarefa "${tarefa.tipo}" ` +
+                    `travou ${falhasAtuais}x seguidas. ` +
+                    `PULANDO pra próxima.`
+                );
+
+                emitir("tarefa_pulada", {
+                    tarefa,
+                    falhas: falhasAtuais,
+                    motivo: "max_falhas_atingido"
+                });
+
+                estado.resetarFalhasTarefa();
+                estado.avancarTarefa();
+                invalidarCache();
+                return;
+            }
+
+            if (falhasAtuais >= CONFIG.falhasAntesDeReplanejar) {
                 estado.definirEstado("replanejando");
                 estado.definirMotivo(MOTIVO.MUITAS_FALHAS);
 
                 emitir("replanejando", {
                     tarefa,
-                    falhas: estado.obter().falhasNaTarefaAtual,
+                    falhas: falhasAtuais,
                     erro: resultado.erro
                 });
 
@@ -903,8 +966,6 @@ function criarExecutor(contexto, deps) {
         obterPerigosCriticos,
         existePerigoCritico,
         existeAlgumPerigo,
-
-        // ⚠️ NOVO (Fase 2)
         injetarPrioridadeCombate
     };
 }

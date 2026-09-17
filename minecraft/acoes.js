@@ -11,6 +11,19 @@
  *
  * Não decide o objetivo da Raiden.
  * Não executa lógica de IA.
+ *
+ * ⚠️ FIX v2 (CRÍTICO):
+ *    Adicionado `case "defender"`.
+ *
+ *    Antes, o handler de `defender` (autonomia/handlers.js)
+ *    chamava `executarAcao("defender")`. Mas não existia
+ *    esse case aqui em `acoes.js`, então caía no default:
+ *
+ *      → "Ação desconhecida: defender"
+ *
+ *    Isso fazia o handler retornar `falha`, o executor
+ *    reinjetava `defender` no topo do plano, e virava
+ *    loop infinito de "travamento persistente".
  */
 
 function criarAcoes(contexto) {
@@ -173,6 +186,63 @@ function criarAcoes(contexto) {
                         combate.parar()
                     );
 
+                // =========================================================
+                // ⚔️ DEFENDER — FIX v2
+                // =========================================================
+                //
+                // ⚠️ O QUE ESTE CASE FAZ:
+                //
+                //   1. Valida que combate.defender existe.
+                //   2. Chama combate.defender().
+                //   3. Normaliza o retorno.
+                //
+                // ⚠️ POR QUE:
+                //
+                //   Sem isso, o handler `defender` da autonomia
+                //   chamava `executarAcao("defender")`, caía no
+                //   default, recebia "Ação desconhecida" e
+                //   retornava `falha`. Loop infinito.
+                case "defender": {
+                    if (
+                        !combate ||
+                        typeof combate.defender !== "function"
+                    ) {
+                        return resultado(
+                            nomeAcao,
+                            false,
+                            "combate.defender indisponível."
+                        );
+                    }
+
+                    try {
+                        const r = await combate.defender();
+
+                        // combate.defender() retorna
+                        // { sucesso, acao, ... } ou false/null.
+                        if (r === false || r === null) {
+                            return resultado(
+                                nomeAcao,
+                                false,
+                                "defender retornou falso."
+                            );
+                        }
+
+                        return resultado(
+                            nomeAcao,
+                            r?.sucesso !== false,
+                            r?.erro || null,
+                            r
+                        );
+
+                    } catch (erro) {
+                        return resultado(
+                            nomeAcao,
+                            false,
+                            erro?.message || "erro_defender"
+                        );
+                    }
+                }
+
                 case "quebrar":
                     return resultado(
                         nomeAcao,
@@ -296,17 +366,33 @@ function criarAcoes(contexto) {
                         navegacao.parar()
                     );
 
-                case "craftar":
+                // =========================================================
+                // 🔨 CRAFTAR — CORRIGIDO
+                // =========================================================
+                //
+                // ⚠️ BUG ANTES:
+                //   `crafting.craftar()` retorna um OBJETO
+                //   ({sucesso, acao, erro, feitos}).
+                //   Passar esse objeto direto pro helper
+                //   `resultado()` fazia `!!objeto` = true SEMPRE,
+                //   mentindo sucesso e causando loop infinito.
+                //
+                // ✅ AGORA:
+                //   Extrai explicitamente `r.sucesso` e `r.erro`.
+                //   Propaga `feitos` pra debug/observabilidade.
+                case "craftar": {
+                    const r = await crafting.craftar(
+                        args.nome ?? args.item,
+                        Number(args.quantidade ?? 1)
+                    );
+
                     return resultado(
                         nomeAcao,
-                        await crafting.craftar(
-                            args.nome ??
-                                args.item,
-                            Number(
-                                args.quantidade ?? 1
-                            )
-                        )
+                        r?.sucesso === true,
+                        r?.erro || null,
+                        { feitos: r?.feitos ?? 0 }
                     );
+                }
 
                 case "construir": {
                     const tipo =

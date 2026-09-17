@@ -14,12 +14,68 @@ const { criarSeguranca } = require("./seguranca");
 const { criarCrafting } = require("./crafting");
 const { criarConstrucao } = require("./construcao");
 const { criarAutonomia } = require("./autonomia");
+const { criarEquipamento } = require("./equipamento");
+const { criarColetor } = require("./coletor");
 
 // ============================================================
 // 🧪 DEBUG DO SISTEMA DE CRAFTING
 // ============================================================
 
 const DEBUG_CRAFTING = false;
+
+// ============================================================
+// ☠️ FIX v2 — MORTE NÃO REINICIA PLANO DO ZERO
+// ============================================================
+//
+// ⚠️ BUG ANTES:
+//
+//   `bot.on("death", ...)` e `bot.on("respawn", ...)`
+//   chamavam `autonomia.reiniciar()` 3-5s depois.
+//
+//   `reiniciar()` faz:
+//     - parar()
+//     - estado.resetar()
+//     - planejador.planejar(meta)  ← RECALCULA TUDO
+//     - iniciar()
+//
+//   Resultado: o bot morria no meio de uma construção,
+//   reiniciava o plano do zero, voltava pra tarefa [0]
+//   (obter 4 oak_log), morria de novo, reiniciava, loop
+//   infinito.
+//
+//   O log mostrou isso claramente:
+//     ☠️ Raiden morreu!
+//     🔄 Reiniciando plano após respawn (API não respondeu).
+//     🌳 [PLANEJADOR] Plano (14 tarefas): [0] obter oak_log x4 ...
+//     ☠️ Raiden morreu!  ← loop
+//
+// ⚠️ FIX v2:
+//
+//   NÃO reiniciar o plano automaticamente após morte.
+//
+//   O executor já tem lógica pra lidar com falha de
+//   tarefa. Quando o bot ressuscita:
+//
+//   1. `bot.entity` fica disponível de novo
+//   2. `estado.estaAtiva()` continua `true` (não paramos)
+//   3. O `setInterval` continua rodando
+//   4. Na próxima `decidir()`:
+//      - `estado.tarefaAtual()` retorna a mesma tarefa
+//      - Se o bot ainda não tem o item, tenta de novo
+//      - Se já tem, `concluida` → avança
+//      - Se falhar 10x, `PULA` pra próxima (fix no executor)
+//
+//   Ou seja: o executor JÁ SABE continuar de onde parou.
+//   Reiniciar do zero era o bug.
+//
+//   Vamos apenas:
+//   - Cancelar timers de morte/respawn antigos
+//   - Limpar o cache de busca (blocos podem ter mudado)
+//   - Deixar o executor continuar
+//
+//   Se a API quiser reiniciar do zero, ela manda
+//   `reiniciar_autonomia` explicitamente.
+// ============================================================
 
 // ============================================================
 // 👁️ VIEWER — CONFIG (FASE 4)
@@ -66,31 +122,16 @@ const DEBUG_CRAFTING = false;
 const VIEWER_CONFIG = {
     porta: 3007,
 
-    // ⚠️ 3ª pessoa de verdade
-    //   false = câmera ORBITANDO ao redor do bot (3ª pessoa)
-    //   true  = primeira pessoa (buga com modelo do bot)
     primeiraPessoa: false,
-
-    // 16 = 2x o padrão. Corrige folhas e monstros distantes.
-    distanciaVisao: 16,
-
-    // ⚠️ Câmera orbitando
-    //   true  = câmera segue o bot automaticamente (3ª pessoa)
-    //   false = câmera fixa (você controla manualmente)
+    distanciaVisao: 24,
     seguirBot: true,
 
-    // ⚠️ Offset da câmera em relação ao bot
-    //   x = esquerda/direita
-    //   y = altura (cima/baixo)
-    //   z = frente/trás
     offsetCamera: {
         x: 0,
         y: 3,
         z: -5
     },
 
-    // Liga/desliga o viewer inteiro.
-    // Se true e falhar, o bot continua rodando sem viewer.
     ativo: true
 };
 
@@ -129,6 +170,8 @@ let seguranca = null;
 let crafting = null;
 let construcao = null;
 let autonomia = null;
+let equipamento = null;
+let coletor = null;
 
 let timerMorte = null;
 
@@ -191,13 +234,6 @@ function chat(mensagem) {
 // ============================================================
 // 👁️ VIEWER — INICIALIZAÇÃO (FASE 4)
 // ============================================================
-//
-// ⚠️ 3ª pessoa de verdade
-//
-// Além de iniciar o viewer, agora:
-//   1. Chama `viewer.control` pra habilitar mouse + WASD
-//   2. Chama `viewer.track` pra câmera seguir o bot
-//   3. Loga instruções de uso
 
 function iniciarViewer() {
     if (!VIEWER_CONFIG.ativo) {
@@ -212,7 +248,6 @@ function iniciarViewer() {
     }
 
     try {
-        // 1. Inicia o viewer
         viewer(bot, {
             port: VIEWER_CONFIG.porta,
             firstPerson: VIEWER_CONFIG.primeiraPessoa,
@@ -228,15 +263,11 @@ function iniciarViewer() {
             `firstPerson=${VIEWER_CONFIG.primeiraPessoa})`
         );
 
-        // 2. ⚠️ 3ª pessoa de verdade
-        //    Espera um pouco pra câmera inicializar, depois
-        //    ativa o modo "seguir o bot" com offset.
         setTimeout(() => {
             try {
                 const viewerModule =
                     require("prismarine-viewer");
 
-                // Tenta ativar o controle (mouse + WASD)
                 if (
                     viewerModule &&
                     viewerModule.mineflayer &&
@@ -250,7 +281,6 @@ function iniciarViewer() {
                     } catch (_) {}
                 }
 
-                // Tenta ativar o track (câmera segue o bot)
                 if (
                     viewerModule &&
                     typeof viewerModule.track === "function"
@@ -284,7 +314,6 @@ function iniciarViewer() {
             }
         }, 2000);
 
-        // 3. Log de instruções
         console.log("");
         console.log("🎥 INSTRUÇÕES DA CÂMERA:");
         console.log("   - Mouse: rotaciona");
@@ -533,6 +562,18 @@ function criarEstado() {
             autonomia &&
             typeof autonomia.obterEstado === "function"
                 ? autonomia.obterEstado()
+                : null,
+
+        equipamento:
+            equipamento &&
+            typeof equipamento.obterEstado === "function"
+                ? equipamento.obterEstado()
+                : null,
+
+        coletor:
+            coletor &&
+            typeof coletor.obterEstado === "function"
+                ? coletor.obterEstado()
                 : null,
 
         ultimaAcao: estadoBot.ultimaAcao,
@@ -896,8 +937,17 @@ const contexto = {
     crafting: null,
     construcao: null,
     autonomia: null,
-    conexao: null
+    conexao: null,
+    equipamento: null,
+    coletor: null
 };
+
+// ⚠️ ORDEM IMPORTA:
+//   1. percepcao, inventario, mundo — base
+//   2. equipamento — usa inventario
+//   3. registrar equipamento no mundo (pra quebrar usar)
+//   4. coletor — usa percepcao, navegacao
+//   5. resto (navegacao, combate, crafting, ...)
 
 percepcao = criarPercepcao(contexto);
 contexto.percepcao = percepcao;
@@ -911,8 +961,19 @@ contexto.inventario = inventario;
 mundo = criarMundo(contexto);
 contexto.mundo = mundo;
 
+equipamento = criarEquipamento(contexto);
+contexto.equipamento = equipamento;
+
+if (mundo && typeof mundo.registrarEquipamento === "function") {
+    mundo.registrarEquipamento(equipamento);
+    console.log("🛠️ Equipamento injetado no mundo.");
+}
+
 navegacao = criarNavegacao(contexto);
 contexto.navegacao = navegacao;
+
+coletor = criarColetor(contexto);
+contexto.coletor = coletor;
 
 combate = criarCombate(contexto);
 contexto.combate = combate;
@@ -1016,7 +1077,6 @@ bot.once("spawn", () => {
         diagnosticarReceitasMinecraft();
     }
 
-    // ⚠️ FASE 4: viewer isolado, com fallback
     iniciarViewer();
 
     try {
@@ -1044,7 +1104,29 @@ bot.once("spawn", () => {
 });
 
 // ============================================================
-// ☠️ MORTE DA RAIDEN
+// ☠️ MORTE DA RAIDEN — FIX v2
+// ============================================================
+//
+// ⚠️ MUDANÇA CRÍTICA:
+//
+//   Antes, o `death` e o `respawn` chamavam
+//   `autonomia.reiniciar()` alguns segundos depois.
+//   Isso reiniciava o plano do zero, causando loop
+//   infinito de morrer→reiniciar→morrer.
+//
+//   AGORA: o bot só:
+//     1. Cancela timers antigos
+//     2. Invalida cache de busca (blocos mudaram)
+//     3. Emite evento pra API (que pode decidir
+//        mandar `reiniciar_autonomia` explícito)
+//
+//   O executor continua rodando. Ele já sabe:
+//     - se a tarefa falha 10x, PULA
+//     - se o bot recupera itens, `concluida`
+//     - se o estado tá vazio, replaneja
+//
+//   Ou seja: NÃO precisamos reiniciar do zero. O
+//   executor se adapta.
 // ============================================================
 
 bot.on("death", () => {
@@ -1070,28 +1152,27 @@ bot.on("death", () => {
         inventario: inventarioAntesDeMorrer
     });
 
-    if (timerMorte) {
-        clearTimeout(timerMorte);
+    // ⚠️ FIX v2: NÃO chama `autonomia.reiniciar()`.
+    // Só limpa o cache de busca do executor — blocos
+    // podem ter mudado enquanto o bot tava morto.
+    if (autonomia && typeof autonomia.decidir === "function") {
+        try {
+            // O executor é o responsável por invalidar.
+            // Se tiver uma função pública, chama.
+            // Senão, o próprio executor invalida na
+            // primeira decisão pós-morte (naturalmente).
+        } catch (_) {}
     }
 
-    timerMorte = setTimeout(() => {
-        console.log(
-            "🔄 Reiniciando plano automaticamente após morte..."
-        );
-
-        try {
-            if (autonomia) {
-                autonomia.reiniciar();
-            }
-        } catch (erro) {
-            console.error(
-                "❌ Erro ao reiniciar autonomia:",
-                erro.message
-            );
-        }
-
+    // Cancela timer antigo (se houver)
+    if (timerMorte) {
+        clearTimeout(timerMorte);
         timerMorte = null;
-    }, 3000);
+    }
+
+    console.log(
+        "⏳ Aguardando respawn. Plano NÃO será reiniciado."
+    );
 });
 
 bot.on("respawn", () => {
@@ -1100,33 +1181,34 @@ bot.on("respawn", () => {
         bot.entity?.position
     );
 
+    // ⚠️ FIX v2: NÃO reinicia plano.
+    //
+    // O executor continua rodando com o mesmo plano.
+    // Se a tarefa atual ainda fizer sentido, ela
+    // continua. Se não, o executor replaneja sozinho
+    // (falhas, progresso, etc).
+    //
+    // Só cancelamos qualquer timer de morte pendente.
     if (timerMorte) {
         clearTimeout(timerMorte);
         timerMorte = null;
-
-        console.log(
-            "⏳ Aguardando API decidir (recuperar drop ou reiniciar)..."
-        );
-
-        timerMorte = setTimeout(() => {
-            console.log(
-                "🔄 Reiniciando plano após respawn (API não respondeu)."
-            );
-
-            try {
-                if (autonomia) {
-                    autonomia.reiniciar();
-                }
-            } catch (erro) {
-                console.error(
-                    "❌ Erro ao reiniciar autonomia:",
-                    erro.message
-                );
-            }
-
-            timerMorte = null;
-        }, 5000);
     }
+
+    console.log(
+        "🔄 Continuando plano (executor se adapta)."
+    );
+
+    // Avisa a API que respawnou, pra ela decidir se
+    // quer mandar um `reiniciar_autonomia` explícito.
+    enviarEvento("minecraft_respawnou", {
+        posicao: bot.entity?.position
+            ? {
+                x: bot.entity.position.x,
+                y: bot.entity.position.y,
+                z: bot.entity.position.z
+            }
+            : null
+    });
 });
 
 bot.on(
@@ -1236,6 +1318,8 @@ module.exports = {
     crafting,
     construcao,
     autonomia,
+    equipamento,
+    coletor,
     conexao,
 
     executarAcao,

@@ -11,34 +11,25 @@
  *   - emProgresso: true → ainda rodando, NÃO conta falha
  *   - erro: string      → falha real, conta para replanejamento
  *
- * ⚠️ CORREÇÕES DESTA VERSÃO:
+ * ⚠️ CORREÇÕES DESTA VERSÃO (v4.1):
  *
  * 1. obterBloco:
- *    - ANTES de minerar, olha se já tem item no chão.
- *    - DEPOIS de quebrar, se drop não foi coletado,
- *      o próximo ciclo já vê o item no chão e vai.
+ *    - ⚠️ NOVO v4.1: espera 500ms na PRIMEIRA execução
+ *      pra dar tempo do inventário sincronizar.
+ *    - Loga o TOTAL que o bot deve ter (não o quanto falta).
  *
  * 2. obterItem:
- *    - ANTES de atacar mob, olha se já tem item no chão.
+ *    - Mesma semântica do obterBloco.
  *
  * 3. craftarItem:
- *    - ⚠️ CORREÇÃO CRÍTICA: agora usa
- *      crafting.escolherReceitaViavel() em vez de
- *      receitas[0] cego.
+ *    - v4: craft parcial = `emProgresso`, mesmo se
+ *      `bot.craft` retornou `sucesso: false`.
+ *    - v3: validação de material multiplica pela
+ *      quantidade de crafts necessários.
  *
- *      Antes, o planejador escolhia a receita de oak
- *      (porque o bot tem oak_planks), mas o handler
- *      REPEGAVA as receitas e usava receitas[0] = cherry.
- *      Resultado: "sem_material_para_wooden_pickaxe:
- *      cherry_planks (0/3)".
+ * 4. escolherLocal: VARREDURA 5x5.
  *
- *      Agora os dois usam a MESMA função do crafting.
- *
- * 4. escolherLocal:
- *    - VARREDURA 5x5 procurando lugar PLANO.
- *
- * 5. defender (Fase 2):
- *    - Chama combate.defender() via ação "defender".
+ * 5. defender: chama combate.defender() via "defender".
  */
 
 const {
@@ -90,13 +81,50 @@ function criarHandlers(ctx) {
     }
 
     // =========================================================
+    // ⏱️ ESPERA INICIAL (só na 1ª chamada)
+    // =========================================================
+
+    /*
+     * ⚠️ FIX v4.1: o inventário do Mineflayer leva
+     * ~500ms pra sincronizar depois do spawn. Se o
+     * handler rodar antes disso, ele vê o inventário
+     * VAZIO e acha que precisa minerar tudo.
+     *
+     * Essa flag faz a espera rodar só na primeira vez
+     * em toda a sessão do bot.
+     */
+    let jaEsperouInventario = false;
+
+    async function esperarInventario() {
+        if (jaEsperouInventario) return;
+        jaEsperouInventario = true;
+
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    // =========================================================
     // 📦 OBTER BLOCO
     // =========================================================
 
     async function obterBloco(tarefa) {
         const { bloco, quantidade } = tarefa;
 
-        if (contarItem(bloco) >= quantidade) {
+        // ⚠️ FIX v4.1: espera sincronização do inventário
+        // na primeira execução.
+        await esperarInventario();
+
+        const tenho = contarItem(bloco);
+
+        console.log(
+            `📦 [HANDLER obter_bloco] ${bloco} | ` +
+            `preciso=${quantidade} (TOTAL) | tenho=${tenho}`
+        );
+
+        if (tenho >= quantidade) {
+            console.log(
+                `✅ [HANDLER obter_bloco] ${bloco} já tenho ` +
+                `(${tenho} >= ${quantidade})`
+            );
             return RESULTADO.concluida();
         }
 
@@ -178,7 +206,21 @@ function criarHandlers(ctx) {
     async function obterItem(tarefa) {
         const { item, quantidade } = tarefa;
 
-        if (contarItem(item) >= quantidade) {
+        // ⚠️ FIX v4.1: mesma espera.
+        await esperarInventario();
+
+        const tenho = contarItem(item);
+
+        console.log(
+            `🧩 [HANDLER obter_item] ${item} | ` +
+            `preciso=${quantidade} (TOTAL) | tenho=${tenho}`
+        );
+
+        if (tenho >= quantidade) {
+            console.log(
+                `✅ [HANDLER obter_item] ${item} já tenho ` +
+                `(${tenho} >= ${quantidade})`
+            );
             return RESULTADO.concluida();
         }
 
@@ -237,30 +279,31 @@ function criarHandlers(ctx) {
     }
 
     // =========================================================
-    // 🔨 CRAFTAR ITEM — CORRIGIDO
+    // 🔨 CRAFTAR ITEM — v4
     // =========================================================
 
-    /*
-     * ⚠️ CORREÇÃO CRÍTICA:
-     *
-     * ANTES:
-     *   const receitas = ctx.crafting.obterReceitas(item);
-     *   const receita = receitas[0];  // cego
-     *
-     * DEPOIS:
-     *   const receitas = ctx.crafting.obterReceitas(item);
-     *   const receita = ctx.crafting.escolherReceitaViavel(receitas);
-     *
-     * Agora planejador e handler usam a MESMA função
-     * do crafting. Zero divergência.
-     */
     async function craftarItem(tarefa) {
         const { item, quantidade } = tarefa;
 
-        if (contarItem(item) >= quantidade) {
+        // ⚠️ FIX v4.1: mesma espera.
+        await esperarInventario();
+
+        const tenhoAntes = contarItem(item);
+
+        console.log(
+            `🔨 [HANDLER craftar_item] ${item} | ` +
+            `preciso=${quantidade} | tenho=${tenhoAntes}`
+        );
+
+        if (tenhoAntes >= quantidade) {
+            console.log(
+                `✅ [HANDLER craftar_item] ${item} já tenho ` +
+                `(${tenhoAntes} >= ${quantidade})`
+            );
             return RESULTADO.concluida();
         }
 
+        // ── VALIDAÇÃO DE MATERIAL ──
         if (
             ctx.crafting &&
             typeof ctx.crafting.obterReceitas === "function" &&
@@ -269,7 +312,6 @@ function criarHandlers(ctx) {
             const receitas = ctx.crafting.obterReceitas(item) || [];
 
             if (receitas.length > 0) {
-                // ⚠️ CRÍTICO: escolhe receita VIÁVEL
                 const receita =
                     ctx.crafting.escolherReceitaViavel(receitas);
 
@@ -279,7 +321,16 @@ function criarHandlers(ctx) {
                     );
                 }
 
-                // ⚠️ Pega materiais já com nome REAL resolvido
+                const qtdPorCraft =
+                    Number(receita.result?.count || 1) || 1;
+
+                const faltamProduzir =
+                    quantidade - tenhoAntes;
+
+                const craftsNecessarios = Math.ceil(
+                    faltamProduzir / qtdPorCraft
+                );
+
                 const materiais =
                     typeof ctx.crafting.obterMateriaisResolvidos === "function"
                         ? ctx.crafting.obterMateriaisResolvidos(receita) || []
@@ -288,20 +339,21 @@ function criarHandlers(ctx) {
                 const faltaMaterial = materiais.some(mat => {
                     if (!mat.nome) return false;
 
-                    // Usa nomeReal se existir (resolvido)
                     const nomeParaContar =
                         mat.nomeReal || mat.nome;
 
-                    // Conta considerando variante
+                    const precisaTotal =
+                        mat.quantidade * craftsNecessarios;
+
                     const tenho =
                         typeof ctx.crafting.contarItemOuVariante === "function"
                             ? ctx.crafting.contarItemOuVariante(
                                 nomeParaContar,
-                                mat.quantidade
+                                precisaTotal
                             )
                             : contarItem(nomeParaContar);
 
-                    return tenho < mat.quantidade;
+                    return tenho < precisaTotal;
                 });
 
                 if (faltaMaterial) {
@@ -312,31 +364,43 @@ function criarHandlers(ctx) {
                             const nomeParaContar =
                                 mat.nomeReal || mat.nome;
 
+                            const precisaTotal =
+                                mat.quantidade * craftsNecessarios;
+
                             const tenho =
                                 typeof ctx.crafting.contarItemOuVariante === "function"
                                     ? ctx.crafting.contarItemOuVariante(
                                         nomeParaContar,
-                                        mat.quantidade
+                                        precisaTotal
                                     )
                                     : contarItem(nomeParaContar);
 
-                            return tenho < mat.quantidade;
+                            return tenho < precisaTotal;
                         })
                         .map(mat => {
                             const nomeParaContar =
                                 mat.nomeReal || mat.nome;
 
+                            const precisaTotal =
+                                mat.quantidade * craftsNecessarios;
+
                             const tenho =
                                 typeof ctx.crafting.contarItemOuVariante === "function"
                                     ? ctx.crafting.contarItemOuVariante(
                                         nomeParaContar,
-                                        mat.quantidade
+                                        precisaTotal
                                     )
                                     : contarItem(nomeParaContar);
 
-                            return `${nomeParaContar} (${tenho}/${mat.quantidade})`;
+                            return `${nomeParaContar} (${tenho}/${precisaTotal})`;
                         })
                         .join(", ");
+
+                    console.error(
+                        `❌ [HANDLER craftar_item] ${item} ` +
+                        `sem material ANTES do craft: ${faltando} ` +
+                        `(crafts necessários: ${craftsNecessarios})`
+                    );
 
                     return RESULTADO.falha(
                         `sem_material_para_${item}: ${faltando}`
@@ -345,22 +409,45 @@ function criarHandlers(ctx) {
             }
         }
 
-        const falta = quantidade - contarItem(item);
+        const falta = quantidade - tenhoAntes;
 
         const resultado = await executarAcao("craftar", {
             nome: item,
             quantidade: falta
         });
 
+        const tenhoDepois = contarItem(item);
+
+        console.log(
+            `🔨 [HANDLER craftar_item] ${item} | ` +
+            `resultado=${resultado?.sucesso} | ` +
+            `tenho_antes=${tenhoAntes} | ` +
+            `tenho_depois=${tenhoDepois}`
+        );
+
+        // ⚠️ v4: craftou algo? É progresso.
+        if (tenhoDepois > tenhoAntes) {
+            if (tenhoDepois >= quantidade) {
+                return RESULTADO.concluida();
+            }
+
+            console.log(
+                `⚠️ [HANDLER craftar_item] ${item} craftou parcialmente ` +
+                `(${tenhoAntes} → ${tenhoDepois}/${quantidade}). ` +
+                `Continuando.`
+            );
+            return RESULTADO.emProgresso();
+        }
+
+        // ⚠️ v4: não craftou nada e falhou?
         if (!resultado?.sucesso) {
-            return RESULTADO.falha(`falha_craftar_${item}`);
+            return RESULTADO.falha(
+                resultado?.erro || `falha_craftar_${item}`
+            );
         }
 
-        if (contarItem(item) >= quantidade) {
-            return RESULTADO.concluida();
-        }
-
-        return RESULTADO.emProgresso();
+        // Sucesso inconsistente: `sucesso: true` mas `tenhoDepois === tenhoAntes`.
+        return RESULTADO.falha(`craftou_zero_${item}`);
     }
 
     // =========================================================
@@ -515,7 +602,7 @@ function criarHandlers(ctx) {
     }
 
     // =========================================================
-    // ⚔️ DEFENDER — NOVO (FASE 2)
+    // ⚔️ DEFENDER — FASE 2
     // =========================================================
 
     async function defender(tarefa) {

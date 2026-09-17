@@ -1,25 +1,54 @@
 /**
  * 🧠 PLANEJADOR — AUTONOMIA
  *
- * ⚠️ CORREÇÃO DESTA VERSÃO:
+ * ⚠️ CORREÇÃO CRÍTICA DESTA VERSÃO (v2 — FIX DO LOOP):
  *
- * 1. ÚNICA FONTE DE VERDADE
- *    escolherReceitaViavel, contarItemOuVariante e
- *    resolverNomeReal agora MORAM NO crafting.js.
+ * 1. ESTOQUES SEPARADOS POR SEÇÃO
+ *    Cada seção (kit mínimo, bioma, meta) tem seu
+ *    PRÓPRIO estoque simulado. Evita que o kit
+ *    "vaze" pra meta.
  *
- * 2. Fallback local MÍNIMO (só se crafting não tiver).
+ * 2. MARGEM DE SEGURANÇA NO `expandirItem`
+ *    O inventário do Mineflayer tem delay de sync
+ *    (100-500ms). Quando o planejador calcula
+ *    "falta = 17 - 15 = 2", pode ser que o bot
+ *    já tenha gasto parte desses 15 antes do
+ *    craft acontecer. Resultado: craft falha,
+ *    replaneja, loop.
  *
- * 3. expandirFerramenta usa RECEITAS_FERRAMENTA com
- *    estrutura `materiais: [...]` e variantes.
+ *    Agora o `falta` tem margem de +2.
  *
- * 4. ⚠️ NOVO — GARANTIR MESA NO PLANO:
- *    Se a receita exige mesa e o bot não tem
- *    crafting_table nem no inventário nem no mundo,
- *    injeta `craftar_item crafting_table` antes.
+ * 3. ⚠️ FIX CRÍTICO — SEMÂNTICA DE `obter_bloco`
  *
- *    Antes, o plano mandava craftar wooden_pickaxe
- *    mas não mandava craftar a mesa. O handler
- *    falhava com "receita exige mesa".
+ *    ANTES (v1):
+ *      `obter_bloco` recebia `quantidade = falta`
+ *      (ex: "obtenha 10").
+ *
+ *      O handler de `obter_bloco` fazia:
+ *        if (contarItem(bloco) >= quantidade) concluida
+ *
+ *      Se o bot tem 15 e a tarefa pede 10, ele
+ *      concluía → pulava a tarefa → craft seguinte
+ *      falhava por falta de material → replanejava →
+ *      loop infinito.
+ *
+ *    AGORA (v2):
+ *      `obter_bloco` recebe `quantidade = jaTemos + falta`
+ *      (ex: "tenha 25 no total").
+ *
+ *      O handler faz:
+ *        if (contarItem(bloco) >= 25) concluida
+ *
+ *      Bot tem 15 → 15 >= 25 é FALSO → minera até 25.
+ *      Aí sim conclui. O craft seguinte encontra 25
+ *      oak_log disponíveis. ✅
+ *
+ * 4. LOG COMPLETO DO PLANO
+ *    O `planejar()` agora loga TODAS as tarefas
+ *    geradas (não só o bioma). Facilita debug.
+ *
+ * 5. `resolverNomeReal` NÃO é mais chamado quando
+ *    o item não existe — devolve o nome canônico.
  */
 
 const {
@@ -32,6 +61,16 @@ const {
     BIOMAS,
     VARIANTES_BLOCO
 } = require("./constantes");
+
+const DEBUG = process.env.PLANEJADOR_DEBUG === "1";
+
+// ⚠️ Margem de segurança pra compensar delay de
+// sync do inventário.
+const MARGEM_SEGURANCA = 2;
+
+function log(...args) {
+    if (DEBUG) console.log("🧠 [PLANEJADOR]", ...args);
+}
 
 function criarPlanejador(contexto) {
     const {
@@ -210,23 +249,14 @@ function criarPlanejador(contexto) {
     }
 
     // =========================================================
-    // 🪑 MESA — NOVO
+    // 🪑 MESA DE CRAFTING
     // =========================================================
 
-    /*
-     * ⚠️ NOVO: verifica se o bot tem crafting_table
-     * disponível (inventário OU mundo).
-     *
-     * Usado pra decidir se precisa injetar
-     * `craftar_item crafting_table` no plano.
-     */
     function temMesaDisponivel() {
-        // No inventário?
         if (contarItem("crafting_table") > 0) {
             return true;
         }
 
-        // No mundo (perto do bot)?
         if (
             crafting &&
             typeof crafting.encontrarMesaNoMundo === "function"
@@ -240,31 +270,20 @@ function criarPlanejador(contexto) {
         return false;
     }
 
-    /*
-     * ⚠️ NOVO: gera as tarefas necessárias pra ter
-     * uma crafting_table craftada (se o bot não tiver).
-     *
-     * Crafting_table = 4 planks (qualquer madeira).
-     * Isso NÃO exige mesa (é 2x2).
-     */
     function expandirMesaCrafting(estoque) {
-        // Já tem?
         if (temMesaDisponivel()) {
             return [];
         }
 
-        // Já foi simulado no estoque?
         if ((estoque["crafting_table"] || 0) > 0) {
             return [];
         }
 
-        // Marca no estoque
         estoque["crafting_table"] =
             (estoque["crafting_table"] || 0) + 1;
 
         const tarefas = [];
 
-        // 4 planks (qualquer variante)
         const material = resolverNomeReal("oak_planks", 4);
 
         const subtarefas = expandirItem(
@@ -284,7 +303,7 @@ function criarPlanejador(contexto) {
     }
 
     // =========================================================
-    // 🛠️ FERRAMENTAS (FASE 1)
+    // 🛠️ FERRAMENTAS
     // =========================================================
 
     function ferramentaNecessaria(nomeBloco) {
@@ -341,7 +360,6 @@ function criarPlanejador(contexto) {
 
         const tarefas = [];
 
-        // ⚠️ NOVO: se a ferramenta exige mesa, garante a mesa
         if (def.precisaMesa) {
             const tarefasMesa = expandirMesaCrafting(estoque);
             tarefas.push(...tarefasMesa);
@@ -387,16 +405,51 @@ function criarPlanejador(contexto) {
     // 🧠 EXPANSÃO
     // =========================================================
 
+    /**
+     * ⚠️ FIX CRÍTICO — SEMÂNTICA DE `obter_bloco` / `obter_item`:
+     *
+     * O `quantidade` que mandamos pro handler precisa ser
+     * o TOTAL que o bot deve TER depois da tarefa, não o
+     * quanto falta obter.
+     *
+     * POR QUÊ:
+     *   O handler de `obter_bloco` faz:
+     *     if (contarItem(bloco) >= quantidade) concluida
+     *
+     *   Se mandarmos `falta` (ex: 10) e o bot tem 15,
+     *   ele conclui imediatamente e PULA a tarefa.
+     *
+     *   Se mandarmos `jaTemos + falta` (ex: 25),
+     *   ele só conclui quando tiver 25 no inventário.
+     *
+     *   O mesmo vale pra `obter_item`.
+     */
     function expandirItem(nomeItem, qtdNecessaria, estoque) {
         const jaSimulado = estoque[nomeItem] || 0;
         const jaTemos = contarItem(nomeItem);
-        const falta = qtdNecessaria - jaSimulado - jaTemos;
+
+        // ⚠️ Margem: soma 2 na necessidade.
+        const alvo = qtdNecessaria + MARGEM_SEGURANCA;
+        const falta = alvo - jaSimulado - jaTemos;
 
         if (falta <= 0) {
             return [];
         }
 
         estoque[nomeItem] = jaSimulado + falta;
+
+        // ⚠️ FIX: `quantidade` a ser mandada pro handler
+        // é o TOTAL que o bot deve ter depois da tarefa.
+        // Se o bot já tem 15 e a falta é 10, o handler
+        // deve mirar 25.
+        const quantidadeTotal = jaTemos + falta;
+
+        log(
+            `expandirItem(${nomeItem}, ${qtdNecessaria}) ` +
+            `| simulado=${jaSimulado} real=${jaTemos} ` +
+            `falta=${falta} (alvo=${alvo}) ` +
+            `→ handler vai mirar TOTAL=${quantidadeTotal}`
+        );
 
         if (ehBloco(nomeItem)) {
             const ferramenta = ferramentaParaCraftar(nomeItem);
@@ -408,7 +461,7 @@ function criarPlanejador(contexto) {
                 tarefasFerramenta.push({
                     tipo: "obter_bloco",
                     bloco: nomeItem,
-                    quantidade: falta
+                    quantidade: quantidadeTotal
                 });
 
                 return tarefasFerramenta;
@@ -432,22 +485,20 @@ function criarPlanejador(contexto) {
             return [{
                 tipo: "obter_bloco",
                 bloco: nomeItem,
-                quantidade: falta
+                quantidade: quantidadeTotal
             }];
         }
 
         return [{
             tipo: "obter_item",
             item: nomeItem,
-            quantidade: falta
+            quantidade: quantidadeTotal
         }];
     }
 
     function expandirReceita(nomeItem, qtdNecessaria, receita, estoque) {
         const tarefas = [];
 
-        // ⚠️ NOVO: se a receita exige mesa, garante a mesa
-        // ANTES de tentar craftar o item.
         if (receita.requiresTable) {
             const tarefasMesa = expandirMesaCrafting(estoque);
             tarefas.push(...tarefasMesa);
@@ -493,7 +544,7 @@ function criarPlanejador(contexto) {
     }
 
     // =========================================================
-    // 🛠️ FASE 1 — KIT MÍNIMO
+    // 🛠️ KIT MÍNIMO
     // =========================================================
 
     function gerarKitMinimo(estoque) {
@@ -529,7 +580,7 @@ function criarPlanejador(contexto) {
     }
 
     // =========================================================
-    // 🛠️ FASE 1 — PROGRESSÃO DE TIER
+    // 🛠️ PROGRESSÃO DE TIER
     // =========================================================
 
     function proximoTier() {
@@ -557,7 +608,7 @@ function criarPlanejador(contexto) {
     }
 
     // =========================================================
-    // 🌳 FASE 3 — BIOMAS
+    // 🌳 BIOMAS
     // =========================================================
 
     function obterBiomaAtual() {
@@ -618,10 +669,16 @@ function criarPlanejador(contexto) {
             for (const recurso of def.recursos) {
                 if (!ehBloco(recurso)) continue;
 
+                // ⚠️ FIX: `quantidade` aqui também é TOTAL.
+                // Como o inventário está vazio, é o mesmo
+                // que "obtenha 8". Mas mantemos a semântica
+                // consistente.
+                const jaTemos = contarItem(recurso);
+
                 tarefas.push({
                     tipo: "obter_bloco",
                     bloco: recurso,
-                    quantidade: 8,
+                    quantidade: jaTemos + 8,
                     origem: "bioma",
                     bioma: bioma.nome
                 });
@@ -639,26 +696,32 @@ function criarPlanejador(contexto) {
 
     function planejar(meta) {
         const tarefas = [];
-        const estoque = {};
 
-        const tarefasKit = gerarKitMinimo(estoque);
+        // ── Kit mínimo: estoque próprio ──
+        const estoqueKit = {};
+        const tarefasKit = gerarKitMinimo(estoqueKit);
         tarefas.push(...tarefasKit);
 
-        const tarefasBioma = gerarTarefasDoBioma(estoque);
+        // ── Bioma: estoque próprio ──
+        const estoqueBioma = {};
+        const tarefasBioma = gerarTarefasDoBioma(estoqueBioma);
         tarefas.push(...tarefasBioma);
 
+        // ── Meta: estoque próprio ──
+        const estoqueMeta = {};
         const itens = meta.itens_necessarios || {};
 
         for (const [nomeItem, qtd] of Object.entries(itens)) {
             const subtarefas = expandirItem(
                 nomeItem,
                 Number(qtd) || 1,
-                estoque
+                estoqueMeta
             );
 
             tarefas.push(...subtarefas);
         }
 
+        // ── Construção ──
         if (meta.construir) {
             tarefas.push({ tipo: "escolher_local" });
 
@@ -677,11 +740,25 @@ function criarPlanejador(contexto) {
             `perigos: ${def.perigos.slice(0, 3).join(", ")}`
         );
 
+        console.log(
+            `🌳 [PLANEJADOR] Plano (${tarefas.length} tarefas):`
+        );
+
+        for (let i = 0; i < tarefas.length; i++) {
+            console.log(
+                `   [${i}] ${JSON.stringify(tarefas[i])}`
+            );
+        }
+
+        log(
+            `Plano gerado (${tarefas.length} tarefas)`
+        );
+
         return tarefas;
     }
 
     // =========================================================
-    // 🔄 CONVERSOR (formato antigo)
+    // 🔄 CONVERSOR
     // =========================================================
 
     function inferirTipoEtapa(nome) {
@@ -749,10 +826,6 @@ function criarPlanejador(contexto) {
         return meta;
     }
 
-    // =========================================================
-    // 🎯 NORMALIZAR META
-    // =========================================================
-
     function normalizarMeta(entrada) {
         if (!entrada || typeof entrada !== "object") {
             return null;
@@ -812,7 +885,6 @@ function criarPlanejador(contexto) {
         contarItemOuVariante,
         resolverNomeReal,
 
-        // ⚠️ NOVO
         temMesaDisponivel,
         expandirMesaCrafting
     };

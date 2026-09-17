@@ -13,7 +13,7 @@
  *
  * ⚠️ CORREÇÕES DESTA VERSÃO:
  *
- * 1. `quebrar` tem TIMEOUT de 8s. Se o bot.dig travar,
+ * 1. `quebrar` tem TIMEOUT. Se o bot.dig travar,
  *    considera falha, chama bot.stopDigging() e retorna.
  *    Se o bloco já sumiu (aborted / not found), considera
  *    SUCESSO.
@@ -28,6 +28,30 @@
  *
  * 4. Exporta `obterBlocoReferencia` e `distanciaDoBot`
  *    para o módulo de construção poder usar.
+ *
+ * 5. ⚠️ NOVO v2: EQUIPAMENTO ANTES DE QUEBRAR.
+ *    O `quebrar` agora chama `equipamento.equiparParaBloco()`
+ *    antes de `bot.dig`, pra usar machado em madeira,
+ *    picareta em pedra, etc.
+ *
+ *    O equipamento é injetado via `registrarEquipamento()`
+ *    (chamado pelo `bot.js` depois de criar os módulos).
+ *    Isso evita dependência circular no require.
+ *
+ * 6. ⚠️ FIX v3: `timeoutQuebraMs` reduzido de 8000 → 5000.
+ *
+ *    POR QUÊ:
+ *      8s na mão é demais. Se o `bot.dig` travou por 8
+ *      segundos, algo está errado (ferramenta errada,
+ *      bloco longe, servidor travado). É melhor falhar
+ *      rápido e replanejar do que segurar o executor.
+ *
+ *      Com machado/picareta, um bloco normal quebra em
+ *      ~0.5-2s. Se passou de 5s, é problema.
+ *
+ *      E combinado com o FIX v2 do `equipamento.js`
+ *      (que agora loga "sem ferramenta"), fica fácil
+ *      ver quando o problema é equipamento faltando.
  */
 
 const { Vec3 } = require("vec3");
@@ -36,6 +60,13 @@ function criarMundo(contexto) {
     const bot = contexto.bot;
     const inventario = contexto.inventario;
 
+    // ⚠️ NOVO v2: equipamento é injetado depois pelo bot.js
+    let equipamento = null;
+
+    function registrarEquipamento(eq) {
+        equipamento = eq;
+    }
+
     const CONFIG = {
         distanciaMaximaInteracao: 4.5,
         distanciaMaximaQuebra: 5,
@@ -43,7 +74,11 @@ function criarMundo(contexto) {
         limiteBusca: 200,
 
         // ⚠️ TIMEOUTS
-        timeoutQuebraMs: 8000,
+        //
+        // ⚠️ FIX v3: `timeoutQuebraMs` de 8000 → 5000.
+        //
+        // Ver cabeçalho do arquivo pra justificativa.
+        timeoutQuebraMs: 5000,
         timeoutColocarMs: 5000,
         timeoutInteragirMs: 5000,
         timeoutUsarMs: 3000
@@ -352,7 +387,7 @@ function criarMundo(contexto) {
     }
 
     // =========================================================
-    // ⛏ QUEBRAR — COM TIMEOUT
+    // ⛏ QUEBRAR — COM TIMEOUT + EQUIPAMENTO
     // =========================================================
 
     async function quebrar(x, y, z) {
@@ -375,6 +410,22 @@ function criarMundo(contexto) {
             return false;
         }
 
+        // ⚠️ NOVO v2: equipa a ferramenta certa antes de quebrar.
+        // Machado pra madeira, picareta pra pedra, etc.
+        if (
+            equipamento &&
+            typeof equipamento.equiparParaBloco === "function"
+        ) {
+            try {
+                await equipamento.equiparParaBloco(bloco.name);
+            } catch (erro) {
+                console.error(
+                    "🛠️ [mundo.quebrar] Erro ao equipar:",
+                    erro.message
+                );
+            }
+        }
+
         try {
             if (bot.targetDigBlock !== bloco) {
                 await bot.lookAt(
@@ -383,8 +434,8 @@ function criarMundo(contexto) {
                 );
             }
 
-            // ⚠️ TIMEOUT: se bot.dig não retornar em 8s,
-            // considera falha e força stopDigging.
+            // ⚠️ TIMEOUT v3: 5s (era 8s).
+            // Se passar disso, algo está errado.
             await comTimeout(
                 bot.dig(bloco, true),
                 CONFIG.timeoutQuebraMs,
@@ -718,10 +769,13 @@ function criarMundo(contexto) {
     // =========================================================
 
     return {
+        // ⚠️ NOVO v2: registro de equipamento
+        registrarEquipamento,
+
         // Consulta
         obterBloco,
         obterBlocoEstado,
-        obterBlocoReferencia,   // ⚠️ NOVO: exportado
+        obterBlocoReferencia,
         encontrarBlocos,
 
         // Ações
@@ -739,7 +793,6 @@ function criarMundo(contexto) {
         estaSolido,
         estaAoAlcance,
 
-        // ⚠️ NOVO: exportado (usado no log de colocar)
         distanciaDoBot,
 
         // Estado

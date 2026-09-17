@@ -9,6 +9,15 @@
  * - gerenciar o setInterval
  *
  * Não contém lógica de planejamento nem de execução.
+ *
+ * ⚠️ CORREÇÃO:
+ *    definirMeta() agora REATIVA o loop se a autonomia
+ *    estava parada (ex: objetivo anterior concluído).
+ *
+ *    Sem isso, o bot ficava zumbi: quando o objetivo
+ *    concluía, o loop parava, e a API não conseguia
+ *    mandar um novo objetivo sem o bot reconectar o
+ *    WebSocket.
  */
 
 const { CONFIG, MOTIVO } = require("./constantes");
@@ -34,19 +43,12 @@ function criarAutonomia(contexto) {
     const executorRef = {};
 
     const handlers = criarHandlers({
-        // contexto original
         mundo: contexto.mundo,
         navegacao: contexto.navegacao,
         percepcao: contexto.percepcao,
         inventario: contexto.inventario,
-
-        // ⚠️ CORREÇÃO: faltava passar crafting.
-        // Sem isso, a validação de material no
-        // handlers.craftarItem era pulada silenciosamente,
-        // e o bot.craft tentava craftar sem material.
         crafting: contexto.crafting,
 
-        // funções do executor (injetadas depois)
         executarAcao: (...args) =>
             executorRef.executor.executarAcao(...args),
         obterPosicao: () =>
@@ -64,7 +66,6 @@ function criarAutonomia(contexto) {
         limparAcao: (...args) =>
             executorRef.executor.limparAcao(...args),
 
-        // acesso ao estado da meta
         obterLocalMeta: () => estado.obter().metaAtual?.local,
         definirLocalMeta: (local) => {
             const meta = estado.obter().metaAtual;
@@ -72,8 +73,14 @@ function criarAutonomia(contexto) {
         }
     });
 
-    // ⚠️ NOVO: dá pro executor uma forma de parar
-    // a si mesmo quando o objetivo conclui.
+    /*
+     * ⚠️ O contextoComParada ainda existe pra
+     * compatibilidade, mas o executor NÃO usa mais
+     * `pararAutonomia` ao concluir objetivo.
+     *
+     * Mantemos aqui caso algum handler futuro queira
+     * chamar parada explícita.
+     */
     const contextoComParada = {
         ...contexto,
         pararAutonomia: (motivo) => parar(motivo)
@@ -116,6 +123,20 @@ function criarAutonomia(contexto) {
             objetivo: meta,
             plano: estado.obter().planoAtual
         });
+
+        // ⚠️ FIX: se a autonomia estava parada
+        // (ex: objetivo anterior concluído), reinicia
+        // o loop pra executar o novo plano.
+        //
+        // Sem isso, o bot recebia definir_objetivo mas
+        // o setInterval continuava morto — ficava zumbi
+        // até reconectar o WebSocket.
+        if (!estado.estaAtiva()) {
+            console.log(
+                "🔄 [AUTONOMIA] Reativando loop por novo objetivo."
+            );
+            iniciar();
+        }
 
         return true;
     }
@@ -223,7 +244,6 @@ function criarAutonomia(contexto) {
                     ? contexto.navegacao.estaNavegando()
                     : false,
 
-            // Compatibilidade com painel antigo
             objetivoAtual: st.metaAtual,
             etapaAtual: st.tarefaAtual,
 

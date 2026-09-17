@@ -31,7 +31,7 @@ const CONFIG = {
     tempoParadoMaximo: 6000,
     distanciaChegada: 3,
     distanciaQuebra: 5,
-    raioBuscaPadrao: 24,
+    raioBuscaPadrao: 64,
     cacheBuscaMs: 5000,
     falhasAntesDeReplanejar: 3,
     cooldownFalha: 8000
