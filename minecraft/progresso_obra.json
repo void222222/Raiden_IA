@@ -1,0 +1,67 @@
+{
+  "faseApp": "aguardando_kokusen",
+  "indiceFila": 0,
+  "fila": [
+    {
+      "arquivo": "house-29.schem",
+      "caminho": "./projetos/house-29.schem",
+      "volume": 1144,
+      "tamanhoX": 11,
+      "tamanhoY": 8,
+      "tamanhoZ": 13
+    },
+    {
+      "arquivo": "house-5.schem",
+      "caminho": "./projetos/house-5.schem",
+      "volume": 4186,
+      "tamanhoX": 13,
+      "tamanhoY": 23,
+      "tamanhoZ": 14
+    },
+    {
+      "arquivo": "casa.schem",
+      "caminho": "./projetos/casa.schem",
+      "volume": 69782,
+      "tamanhoX": 37,
+      "tamanhoY": 46,
+      "tamanhoZ": 41
+    },
+    {
+      "arquivo": "AmethystTreeV08-59.schem",
+      "caminho": "./projetos/AmethystTreeV08-59.schem",
+      "volume": 240584,
+      "tamanhoX": 68,
+      "tamanhoY": 61,
+      "tamanhoZ": 58
+    },
+    {
+      "arquivo": "AngelDSStv64-124.schem",
+      "caminho": "./projetos/AngelDSStv64-124.schem",
+      "volume": 834024,
+      "tamanhoX": 118,
+      "tamanhoY": 124,
+      "tamanhoZ": 57
+    },
+    {
+      "arquivo": "zone-16.schem",
+      "caminho": "./projetos/zone-16.schem",
+      "volume": 863760,
+      "tamanhoX": 118,
+      "tamanhoY": 61,
+      "tamanhoZ": 120
+    },
+    {
+      "arquivo": "SepiaEosSt134.schem",
+      "caminho": "./projetos/SepiaEosSt134.schem",
+      "volume": 1312128,
+      "tamanhoX": 136,
+      "tamanhoY": 134,
+      "tamanhoZ": 72
+    }
+  ],
+  "xBaseGlobal": 307,
+  "zBaseGlobal": 23,
+  "yZeroGlobal": -60,
+  "larguraAtual": 17,
+  "profundidadeAtual": 19
+}

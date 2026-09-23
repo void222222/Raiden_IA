@@ -13,6 +13,16 @@ Responsabilidades:
 - controlar estado de conexão
 - fornecer uma interface simples para a API
 
+⚠️ NOVO MODELO (The Sims):
+    O bot novo (bot.js) é 100% autônomo. Ele manda
+    o estado a cada 1s, incluindo:
+      - posicao, vida, fome, inventario (padrão)
+      - casas (coordenadas de casas construídas)
+      - obra (casa sendo construída agora)
+      - ativo (pausado ou não)
+
+    A API só observa e manda comandos pontuais.
+
 Contrato de ação:
 
     A API gera um `acao_id` e envia junto com a ação.
@@ -30,7 +40,7 @@ Contrato de ação:
 
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import WebSocket
 
@@ -77,6 +87,11 @@ class MinecraftBridge:
             "inventario": [],
 
             "entidades": [],
+
+            # ⚠️ NOVOS CAMPOS (bot The Sims)
+            "casas": [],
+            "obra": None,
+            "ativo": True,
 
         }
 
@@ -188,32 +203,11 @@ class MinecraftBridge:
         posteriormente recebido do Minecraft.
 
         Se `acao_id` não for informado, um UUID é gerado
-        automaticamente. Isso garante que `acao_pendente`
-        sempre poderá ser limpa quando o resultado chegar.
+        automaticamente.
 
         Os parâmetros específicos da ação são agrupados
         dentro da chave `"parametros"`, mantendo o
         protocolo alinhado com o `bot.js`.
-
-        Exemplo:
-
-        await minecraft_bridge.executar_acao(
-            "andar",
-            direcao="frente",
-            duracao=2
-        )
-
-        Isso gera:
-
-        {
-            "tipo": "minecraft_acao",
-            "acao": "andar",
-            "acao_id": "abc123",
-            "parametros": {
-                "direcao": "frente",
-                "duracao": 2
-            }
-        }
         """
 
         if acao_id is None:
@@ -292,6 +286,54 @@ class MinecraftBridge:
         )
 
     # ========================================================
+    # 🛑 CONTROLE DA AUTONOMIA
+    # ========================================================
+
+    async def pausar(self) -> bool:
+        """Pausa o loop de decisão do bot."""
+
+        return await self.executar_acao(
+            "pausar"
+        )
+
+    async def continuar(self) -> bool:
+        """Retoma o loop de decisão do bot."""
+
+        return await self.executar_acao(
+            "continuar"
+        )
+
+    async def ir_para(
+        self,
+        x: float,
+        y: float,
+        z: float
+    ) -> bool:
+        """Manda o bot andar até uma coordenada."""
+
+        return await self.executar_acao(
+            "ir_para",
+            x=x,
+            y=y,
+            z=z
+        )
+
+    async def construir_casa(
+        self,
+        x: float,
+        y: float,
+        z: float
+    ) -> bool:
+        """Manda o bot construir uma casa na coordenada."""
+
+        return await self.executar_acao(
+            "construir_casa",
+            x=x,
+            y=y,
+            z=z
+        )
+
+    # ========================================================
     # 👀 OLHAR
     # ========================================================
 
@@ -343,6 +385,26 @@ class MinecraftBridge:
 
         return await self.executar_acao(
             "quebrar",
+            x=x,
+            y=y,
+            z=z
+        )
+
+    # ========================================================
+    # 🧱 COLOCAR BLOCO
+    # ========================================================
+
+    async def colocar(
+        self,
+        nomeItem: str,
+        x: float,
+        y: float,
+        z: float
+    ) -> bool:
+
+        return await self.executar_acao(
+            "colocar",
+            nomeItem=nomeItem,
             x=x,
             y=y,
             z=z
@@ -428,8 +490,9 @@ class MinecraftBridge:
         O Minecraft envia esse estado continuamente.
 
         NOTA:
-        O bot.js envia alguns campos com nomes diferentes
-        (camelCase vs snake_case). Aceitamos os dois.
+        O bot.js envia alguns campos com nomes
+        diferentes (camelCase vs snake_case).
+        Aceitamos os dois.
         """
 
         if not isinstance(
@@ -454,133 +517,85 @@ class MinecraftBridge:
                     return estado[chave]
             return None
 
-        # ====================================================
-        # 📍 POSIÇÃO
-        # ====================================================
-
+        # ── POSIÇÃO ──
         valor = _ler("posicao")
-
         if valor is not None:
-
             self.estado["posicao"] = valor
 
-        # ====================================================
-        # 👀 ROTAÇÃO
-        # ====================================================
-
+        # ── ROTAÇÃO ──
         valor = _ler("rotacao")
-
         if valor is not None:
-
             self.estado["rotacao"] = valor
 
-        # ====================================================
-        # 🏃 VELOCIDADE
-        # ====================================================
-
+        # ── VELOCIDADE ──
         valor = _ler("velocidade")
-
         if valor is not None:
-
             self.estado["velocidade"] = valor
 
-        # ====================================================
-        # 🧍 CHÃO
-        # ====================================================
-
+        # ── CHÃO ──
         valor = _ler("no_chao", "noChao")
-
         if valor is not None:
-
             self.estado["no_chao"] = valor
 
-        # ====================================================
-        # ❤️ VIDA
-        # ====================================================
-
+        # ── VIDA ──
         valor = _ler("vida")
-
         if valor is not None:
-
             self.estado["vida"] = valor
 
-        # ====================================================
-        # 🍗 FOME
-        # ====================================================
-
+        # ── FOME ──
         valor = _ler("fome")
-
         if valor is not None:
-
             self.estado["fome"] = valor
 
-        # ====================================================
-        # 🫁 OXIGÊNIO
-        # ====================================================
-
+        # ── OXIGÊNIO ──
         valor = _ler("oxigenio", "oxygen")
-
         if valor is not None:
-
             self.estado["oxigenio"] = valor
 
-        # ====================================================
-        # ⭐ EXPERIÊNCIA
-        # ====================================================
-        #
-        # O bot.js envia:
-        #   "experiencia": { "nivel": N, "pontos": P, "progresso": X }
-        #
-        # Normalizamos para "nivel_experiencia" (só o nível),
-        # mantendo compatibilidade com o formato antigo.
-
+        # ── EXPERIÊNCIA ──
         exp_objeto = _ler("experiencia", "experience")
-
         if isinstance(exp_objeto, dict):
-
             nivel = exp_objeto.get("nivel")
-
             if nivel is not None:
-
                 self.estado["nivel_experiencia"] = nivel
-
         else:
-
             valor = _ler("nivel_experiencia")
-
             if valor is not None:
-
                 self.estado["nivel_experiencia"] = valor
 
-        # ====================================================
-        # 🖐️ ITEM NA MÃO
-        # ====================================================
-
+        # ── ITEM NA MÃO ──
         valor = _ler("item_na_mao", "itemNaMao")
-
         if valor is not None:
-
             self.estado["item_na_mao"] = valor
 
-        # ====================================================
-        # 🎒 INVENTÁRIO
-        # ====================================================
-
+        # ── INVENTÁRIO ──
         inventario = _ler("inventario")
-
         if isinstance(inventario, list):
-
             self.estado["inventario"] = inventario
 
-        # ====================================================
-        # 👾 ENTIDADES
-        # ====================================================
-
+        # ── ENTIDADES ──
         entidades = _ler("entidades")
-
         if isinstance(entidades, list):
-
             self.estado["entidades"] = entidades
+
+        # ══════════════════════════════════════════════════
+        # ⚠️ CAMPOS NOVOS DO BOT THE SIMS
+        # ══════════════════════════════════════════════════
+
+        # ── CASAS CONSTRUÍDAS ──
+        casas = _ler("casas")
+        if isinstance(casas, list):
+            self.estado["casas"] = casas
+
+        # ── OBRA EM ANDAMENTO ──
+        obra = _ler("obra")
+        if obra is not None:
+            self.estado["obra"] = obra
+
+        # ── ATIVO ──
+        ativo = _ler("ativo")
+        if ativo is not None:
+            self.estado["ativo"] = bool(ativo)
 
     # ========================================================
     # ⚔️ RESULTADO DE AÇÃO
@@ -594,22 +609,12 @@ class MinecraftBridge:
         Guarda o resultado da última ação executada
         pelo Minecraft e atualiza o controle da ação
         pendente.
-
-        Regras:
-
-        - O resultado SÓ é associado à ação pendente
-          se o `acao_id` vier e bater com o ID pendente.
-        - Quando o resultado chega, `acao_pendente`
-          é limpo (`None`).
-        - O resultado continua acessível em
-          `ultima_acao`.
         """
 
         if not isinstance(
             resultado,
             dict
         ):
-
             return
 
         self.ultima_acao = dict(
@@ -621,15 +626,11 @@ class MinecraftBridge:
         )
 
         if acao_id is not None:
-
             self.ultima_acao_id = str(
                 acao_id
             )
 
-        if (
-            self.acao_pendente
-            is not None
-        ):
+        if self.acao_pendente is not None:
 
             id_pendente = (
                 self.acao_pendente.get(
@@ -642,7 +643,6 @@ class MinecraftBridge:
                 and str(acao_id)
                 == str(id_pendente)
             ):
-
                 self.acao_pendente = None
 
         logger.info(
@@ -658,16 +658,12 @@ class MinecraftBridge:
         self,
         mensagem: dict
     ):
-        """
-        Guarda a última mensagem recebida
-        do chat do Minecraft.
-        """
+        """Guarda a última mensagem do chat."""
 
         if not isinstance(
             mensagem,
             dict
         ):
-
             return
 
         self.ultima_mensagem_chat = mensagem
@@ -733,7 +729,33 @@ class MinecraftBridge:
                     ]
                 ),
 
+            # ⚠️ NOVOS
+            "casas":
+                list(
+                    self.estado["casas"]
+                ),
+
+            "obra":
+                self.estado["obra"],
+
+            "ativo":
+                self.estado["ativo"],
+
         }
+
+    # ========================================================
+    # 🏠 OBTER CASAS
+    # ========================================================
+
+    def obter_casas(self) -> List[dict]:
+        """Retorna lista de casas construídas."""
+
+        return list(self.estado.get("casas", []))
+
+    def obter_obra_atual(self) -> Optional[dict]:
+        """Retorna a obra em andamento (ou None)."""
+
+        return self.estado.get("obra")
 
     # ========================================================
     # 🎮 OBTER ÚLTIMA AÇÃO
@@ -744,7 +766,6 @@ class MinecraftBridge:
     ) -> Optional[dict]:
 
         if self.ultima_acao is None:
-
             return None
 
         return dict(
@@ -770,7 +791,6 @@ class MinecraftBridge:
     ) -> Optional[dict]:
 
         if self.acao_pendente is None:
-
             return None
 
         return dict(
@@ -785,11 +805,7 @@ class MinecraftBridge:
         self
     ) -> Optional[dict]:
 
-        if (
-            self.ultima_mensagem_chat
-            is None
-        ):
-
+        if self.ultima_mensagem_chat is None:
             return None
 
         return dict(
@@ -815,6 +831,12 @@ class MinecraftBridge:
 
             "estado":
                 self.obter_estado(),
+
+            "casas":
+                self.obter_casas(),
+
+            "obra":
+                self.obter_obra_atual(),
 
             "ultima_acao":
                 self.obter_ultima_acao(),

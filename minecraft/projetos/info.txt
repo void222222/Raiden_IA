@@ -1,0 +1,9 @@
+Minecraft Sepia |EoS| Statue Free
+
+Dimensions: 136×134×72  Length×Height×Width (+19100 Blocks)
+
+Format : .nbt .litematic .schem
+
+The list of blocks can be viewed using the Litematica mod.
+
+There is NO tutorial. It was tested and prepared with the Java version.

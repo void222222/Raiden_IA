@@ -1,0 +1,39 @@
+End Crystal Tower | Build Schematic
+By AbsoluteGrace
+
+---
+
+Hello my lovely friends! I'm pleased to present a 1.19 updated Schematic file for my End Crystal Tower Build.
+
+Multiple formats have been provided:
+- Litematica (.litematic)
+- WorldEdit/MCEdit/Schematica (.schem)
+- Minecraft Structure (.nbt)
+
+Thank you for showing your support by downloading! You are amazing!
+
+I hope you enjoy!
+
+~Grace
+
+---
+
+Instructions:
+Where to copy/paste
+
+For .litematic > ".minecraft/schematics"
+
+For .schem > ".minecraft/config/worldedit/schematics"
+
+For .nbt > ".minecraft/saves/*WORLDNAME*/generated/minecraft/structures" 
+(NOTE: If you don't see the "generated" folder, just add one. Then inside that add another folder "minecraft". And inside that add one more folder called "structures". Paste .nbt.)
+
+---
+
+Additional Notes:
+
+You are welcome to use this build in your server/world with credit to me, AbsoluteGrace, as the original creator. Because sharing is caring!
+
+For your security, this file should only be downloaded from Planet Minecraft. 
+https://www.planetminecraft.com/project/end-crystal-tower/
+

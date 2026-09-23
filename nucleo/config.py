@@ -5,6 +5,11 @@ Toda configuração que vem de variável de ambiente,
 constante de caminho e afins.
 
 Sem lógica. Sem estado. Sem dependências externas.
+
+⚠️ MUDANÇA:
+    `MINECRAFT_AUTONOMIA_ATIVA` agora é `False` por
+    padrão. O bot novo (bot.js) é 100% autônomo.
+    A API só OBSERVA e manda comandos pontuais.
 """
 
 import os
@@ -111,10 +116,34 @@ PASTA_PAINEL = (
 # ============================================================
 # ⛏ MINECRAFT
 # ============================================================
+#
+# ⚠️ MUDANÇA IMPORTANTE:
+#
+# MINECRAFT_AUTONOMIA_ATIVA agora é False por padrão.
+#
+# Motivo:
+#   O bot novo (bot.js) tem o próprio "cérebro The Sims".
+#   Ele já sabe:
+#     - sobreviver (comer, fugir, lutar)
+#     - craftar kit mínimo
+#     - construir casa a cada 30 blocos
+#     - ligar casas com estrada
+#
+#   A API Python NÃO precisa mais controlar ele.
+#
+#   O que a API faz agora:
+#     - Recebe estado (posição, vida, casas)
+#     - Recebe eventos (morreu, casa terminada)
+#     - Manda comandos pontuais SE o usuário pedir
+#
+#   Se quiser LIGAR o loop estratégico antigo de volta
+#   (não recomendado), é só setar:
+#       export RAIDEN_MINECRAFT_AUTONOMIA=1
+#
 
 MINECRAFT_AUTONOMIA_ATIVA = _env_bool(
     "RAIDEN_MINECRAFT_AUTONOMIA",
-    True
+    False     # ⚠️ ANTES ERA True. Agora é False.
 )
 
 MINECRAFT_INTERVALO_DECISAO = float(
